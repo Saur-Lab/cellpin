@@ -2,6 +2,8 @@
 
 CellPin is a two-stage VAE for imputing full-gene expression in spatial transcriptomics data using a single-cell RNA-seq reference. A panel encoder (seeing only the measured spatial genes) is trained to match the latent geometry of a full-gene encoder, then used at inference to decode complete expression profiles.
 
+See the [tutorial notebook](cellpin_tutorial.ipynb) for a step-by-step walkthrough.
+
 ---
 
 ## Installation
@@ -23,7 +25,7 @@ cd cellpin
 pip install -e .
 ```
 
-### uv
+### uv (recommended)
 
 ```bash
 git clone https://github.com/Saur-Lab/cellpin.git
@@ -167,6 +169,18 @@ adata_out = model.impute(
 ```
 
 `impute_to_anndata()` is a simpler alternative that skips MC averaging and returns raw mean counts + embeddings.
+
+---
+
+## UMAP from CellPin embeddings
+
+After imputation, cell embeddings are stored in `adata_imputed.obsm["X_cellpin"]`. Use them directly as input for neighborhood graph construction and UMAP:
+
+```python
+sc.pp.neighbors(adata_imputed, use_rep="X_cellpin")
+sc.tl.umap(adata_imputed)
+sc.pl.umap(adata_imputed, color="cell_type")
+```
 
 ---
 

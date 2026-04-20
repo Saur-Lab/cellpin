@@ -33,6 +33,7 @@ buck-out/
 data/
 results/
 checkpoints/
+cellpin_output/
 
 # Models
 *.pt
