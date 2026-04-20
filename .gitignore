@@ -1,0 +1,61 @@
+# OS / Editor temp files
+.DS_Store
+*~
+.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+.*cache/
+
+# Buck
+buck-out/
+
+# Node
+/node_modules/
+
+# Distribution / packaging
+/dist/
+
+# Data and results
+*.h5ad
+*.h5
+*.csv
+data/
+results/
+checkpoints/
+
+# Models
+*.pt
+*.pth
+
+# Logs
+*.log
+wandb/
+.coverage*
+
+# Docs
+/docs/generated/
+/docs/_build/
+
+# Misc
+view_result.ipynb
+*.pdf
+
+# Ignore experiment folder 
+experiments/
+
+#Claude
+.claude/
+CLAUDE.md 
+
+
