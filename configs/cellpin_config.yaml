@@ -1,7 +1,7 @@
-n_latent: 128
+n_latent: 192
 latent_distribution: normal
 n_hidden: 1024
-encoder_layers: 7
+encoder_layers: 16
 encoder_dropout: 0.2
 drop_path_rate: 0.15
 ffn_expansion: 2
