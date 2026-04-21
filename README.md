@@ -44,7 +44,11 @@ import torch
 import scanpy as sc
 import cellpin
 
-# Load your data
+# Load packaged example data (downloaded on first call)
+sc_adata = cellpin.pp.load_sc_example()
+sp_adata = cellpin.pp.load_sp_example()
+
+# Or load your own data
 sc_adata = sc.read_h5ad("sc_reference.h5ad")   # single-cell RNA-seq atlas
 sp_adata = sc.read_h5ad("spatial.h5ad")        # spatial transcriptomics (panel genes only)
 
