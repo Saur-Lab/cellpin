@@ -8,13 +8,13 @@ from torch.utils.data import DataLoader, random_split
 
 DEFAULT_PARAMS = {
     # Architecture
-    "n_latent": 128,
+    "n_latent": 192,
     "n_hidden": 1024,
-    "encoder_layers": 7,
+    "encoder_layers": 16,
     "encoder_dropout": 0.2,
     "drop_path_rate": 0.15,
     "ffn_expansion": 2,
-    "layer_scale_init": 0.001,
+    "layer_scale_init": 0.0014,
     "decoder_layers": 2,
     "reconstruction_loss": "nb",
     "log_variational": True,
@@ -32,11 +32,11 @@ DEFAULT_PARAMS = {
     "lambda_pearson": 0.05,
     "reconstruct_panel": True,
     "distillation_mode": "mse",
-    "snn_temperature_init": 0.17,
+    "snn_temperature_init": 0.173,
     "exclude_panel": False,
     # Optimiser
-    "lr": 0.0002,
-    "weight_decay": 1e-6,
+    "lr": 0.00021,
+    "weight_decay": 1.3e-6,
 }
 
 
