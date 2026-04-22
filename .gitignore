@@ -16,6 +16,8 @@ venv/
 dist/
 build/
 .*cache/
+# Optuna test 
+optuna_cellpin.py
 
 # Buck
 buck-out/
