@@ -1,6 +1,7 @@
 import logging
 import warnings
 from pathlib import Path
+import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
     EarlyStopping,
@@ -20,6 +21,8 @@ warnings.filterwarnings("ignore", message=".*num_workers.*bottleneck.*")
 warnings.filterwarnings("ignore", message=".*`isinstance.*LeafSpec.*deprecated.*")
 warnings.filterwarnings("ignore", message=".*set_float32_matmul_precision.*")
 
+torch.set_float32_matmul_precision("high")
+
 
 class CellPinTrainer:
     """Trainer class for CellPin models using PyTorch Lightning."""
@@ -30,7 +33,7 @@ class CellPinTrainer:
         output_dir: str | Path = "./experiments/default",
         accelerator: str = "auto",
         devices: int | list = 1,
-        precision: str = "32",
+        precision: str = "bf16-mixed",
         accumulate_grad_batches: int = 1,
         gradient_clip_val: float | None = 1.0,
         enable_early_stopping: bool = True,
@@ -40,7 +43,7 @@ class CellPinTrainer:
         enable_checkpointing: bool = True,
         checkpoint_monitor: str = "val_loss",
         checkpoint_mode: str = "min",
-        save_top_k: int = 3,
+        save_top_k: int = 1,
         log_every_n_steps: int = 10,
         enable_progress_bar: bool = True,
         deterministic: bool = False,

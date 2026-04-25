@@ -85,7 +85,7 @@ def save_checkpoint(path: Path, state_dict: dict[str, Any], hyperparameters: dic
 
 
 def build_data_loaders(
-    dataset, train_size: float = 0.8, batch_size: int = 128, num_workers: int = 0, seed: int = 42
+    dataset, train_size: float = 0.8, batch_size: int = 128, num_workers: int = 4, seed: int = 42
 ) -> tuple[DataLoader, DataLoader]:
     """Build train and validation data loaders from dataset.
 
@@ -110,8 +110,12 @@ def build_data_loaders(
         [n_train, n_val],
         generator=torch.Generator().manual_seed(seed),
     )
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True
+    loader_kwargs = dict(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+    val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     return train_loader, val_loader

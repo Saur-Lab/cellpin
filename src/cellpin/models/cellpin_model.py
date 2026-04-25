@@ -712,7 +712,7 @@ class CellPin(pl.LightningModule):
             dataset,
             train_size=train_size,
             batch_size=trainer_kwargs.pop("batch_size", 128),
-            num_workers=trainer_kwargs.pop("num_workers", 0),
+            num_workers=trainer_kwargs.pop("num_workers", 4),
         )
         trainer_kwargs = {**trainer_kwargs, "max_epochs": max_epochs}
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
@@ -793,7 +793,7 @@ class CellPin(pl.LightningModule):
             dataset,
             train_size=train_size,
             batch_size=trainer_kwargs.pop("batch_size", 128),
-            num_workers=trainer_kwargs.pop("num_workers", 0),
+            num_workers=trainer_kwargs.pop("num_workers", 4),
         )
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
         trainer.fit(self, train_loader, val_loader)
