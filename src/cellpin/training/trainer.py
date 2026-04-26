@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     TQDMProgressBar,
 )
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import CSVLogger, TensorBoardLogger
 from torch.utils.data import DataLoader
 
 # Suppress Lightning's INFO chatter (GPU available, LOCAL_RANK, litlogger tip, etc.)
@@ -125,12 +125,18 @@ class CellPinTrainer:
         if custom_callbacks:
             self.callbacks.extend(custom_callbacks)
 
-        # Logger
-        self.logger = TensorBoardLogger(
-            save_dir=str(self.output_dir),
-            name="logs",
-            default_hp_metric=False,
-        )
+        # Loggers — TensorBoard for interactive inspection, CSV for programmatic access
+        self.logger = [
+            TensorBoardLogger(
+                save_dir=str(self.output_dir),
+                name="tb_logs",
+                default_hp_metric=False,
+            ),
+            CSVLogger(
+                save_dir=str(self.output_dir),
+                name="csv_logs",
+            ),
+        ]
 
         # Initialize trainer
         self.trainer = pl.Trainer(

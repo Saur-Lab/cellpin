@@ -16,8 +16,11 @@ venv/
 dist/
 build/
 .*cache/
-# Optuna test 
+# Optuna test
 optuna_cellpin.py
+
+# Local scratch / mock scripts
+scratch_*.py
 
 # Buck
 buck-out/

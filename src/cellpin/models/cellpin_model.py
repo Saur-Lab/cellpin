@@ -42,6 +42,7 @@ from cellpin.models.utils import (
     load_config_and_checkpoint,
     save_checkpoint,
 )
+from cellpin.pl import PlotAccessor
 from cellpin.training import CellPinTrainer
 
 
@@ -180,6 +181,12 @@ class CellPin(pl.LightningModule):
             getattr(self, "decoder_warm_unfreeze_epoch", -1)
         )
         self._decoder_unfrozen: bool = True
+
+        # Log directories set after training — used by model.pl.losses()
+        self._pretrain_output_dir: Path | None = None
+        self._train_output_dir: Path | None = None
+
+        self.pl = PlotAccessor(self)
 
 
 
@@ -715,6 +722,7 @@ class CellPin(pl.LightningModule):
             num_workers=trainer_kwargs.pop("num_workers", 4),
         )
         trainer_kwargs = {**trainer_kwargs, "max_epochs": max_epochs}
+        self._pretrain_output_dir = Path(trainer_kwargs.get("output_dir", "./experiments/default"))
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
         try:
             trainer.fit(self, train_loader, val_loader)
@@ -795,6 +803,7 @@ class CellPin(pl.LightningModule):
             batch_size=trainer_kwargs.pop("batch_size", 128),
             num_workers=trainer_kwargs.pop("num_workers", 4),
         )
+        self._train_output_dir = Path(trainer_kwargs.get("output_dir", "./experiments/default"))
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
         trainer.fit(self, train_loader, val_loader)
 
