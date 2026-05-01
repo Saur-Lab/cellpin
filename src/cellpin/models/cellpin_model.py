@@ -128,6 +128,7 @@ class CellPin(pl.LightningModule):
             "recon":     float(getattr(self, "lambda_recon", 1.0)),
             "inv":       float(getattr(self, "lambda_inv", 1.0)),
             "snn":       float(getattr(self, "lambda_snn", 0.1)),
+            "distill":   float(getattr(self, "lambda_distill", 1.0)),
         }
 
         self.kl_warmup_epochs = int(getattr(self, "kl_warmup_epochs", 0))
@@ -585,7 +586,7 @@ class CellPin(pl.LightningModule):
         snn_temp = self.snn_temperature.exp().clamp(0.01, 1.0)
         snn = soft_nn_loss(out_panel["qz_m"], out_full["qz_m"].detach(), temperature=snn_temp)
 
-        inv_loss = distill_loss + w.get("snn", 0.1) * snn
+        inv_loss = w.get("distill", 1.0) * distill_loss + w.get("snn", 0.1) * snn
 
         kl_w = self._kl_annealing_weight() * w["kl_weight"]
         total = (

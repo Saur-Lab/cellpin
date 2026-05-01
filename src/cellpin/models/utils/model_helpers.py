@@ -29,6 +29,7 @@ DEFAULT_PARAMS = {
     "kl_warmup_epochs": 20,
     "lambda_inv": 20.0,
     "lambda_snn": 0.085,
+    "lambda_distill": 1.0,
     "lambda_pearson": 0.05,
     "reconstruct_panel": True,
     "distillation_mode": "mse",
