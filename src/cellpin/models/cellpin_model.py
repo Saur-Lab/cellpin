@@ -722,13 +722,13 @@ class CellPin(pl.LightningModule):
             num_workers=trainer_kwargs.pop("num_workers", 4),
         )
         trainer_kwargs = {**trainer_kwargs, "max_epochs": max_epochs}
-        self._pretrain_output_dir = Path(trainer_kwargs.get("output_dir", "./experiments/default"))
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
         try:
             trainer.fit(self, train_loader, val_loader)
         finally:
             self._training_stage = "main"
             self._pretrain_completed = True
+        self._pretrain_output_dir = Path(trainer.logger[1].log_dir)
 
         best = trainer.best_model_path
         if best:
@@ -803,9 +803,9 @@ class CellPin(pl.LightningModule):
             batch_size=trainer_kwargs.pop("batch_size", 128),
             num_workers=trainer_kwargs.pop("num_workers", 4),
         )
-        self._train_output_dir = Path(trainer_kwargs.get("output_dir", "./experiments/default"))
         trainer = CellPinTrainer(custom_callbacks=custom_callbacks, **trainer_kwargs)
         trainer.fit(self, train_loader, val_loader)
+        self._train_output_dir = Path(trainer.logger[1].log_dir)
 
         best = trainer.best_model_path
         if best:
