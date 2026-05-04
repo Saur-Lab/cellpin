@@ -20,6 +20,7 @@ kl_warmup_epochs: 20
 lambda_inv: 20
 lambda_snn: 0.085
 lambda_pearson: 0.05
+lambda_distill: 1.0
 reconstruct_panel: true
 distillation_mode: mse
 snn_temperature_init: 0.173
