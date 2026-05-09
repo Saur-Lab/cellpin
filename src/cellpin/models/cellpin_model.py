@@ -43,6 +43,7 @@ from cellpin.models.utils import (
     save_checkpoint,
 )
 from cellpin.pl import PlotAccessor
+from cellpin.tl import TLAccessor
 from cellpin.training import CellPinTrainer
 
 
@@ -188,6 +189,7 @@ class CellPin(pl.LightningModule):
         self._train_output_dir: Path | None = None
 
         self.pl = PlotAccessor(self)
+        self.tl = TLAccessor(self)
 
 
 
