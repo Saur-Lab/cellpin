@@ -1071,6 +1071,7 @@ class CellPin(pl.LightningModule):
         train_size: float = 0.8,
         save_checkpoints: bool = False,
         output_dir: str = "./cellpin_output",
+        decoder_warm_unfreeze_epoch: int = -1,
         **trainer_kwargs,
     ) -> None:
         """Train CellPin: Stage 1 (pretrain) followed by Stage 2 (distillation).
@@ -1092,6 +1093,10 @@ class CellPin(pl.LightningModule):
                 or load the best epoch after early stopping.
             output_dir: Root directory for checkpoints and logs
                 (only used when ``save_checkpoints=True``).
+            decoder_warm_unfreeze_epoch: Stage 2 epoch at which the frozen
+                decoder is unfrozen for warm fine-tuning. Only active when
+                ``freeze_pretrained=True``. ``-1`` (default) keeps the decoder
+                frozen for the entire Stage 2 run.
             **trainer_kwargs: Extra arguments forwarded to
                 :class:`~cellpin.training.CellPinTrainer` (e.g. ``devices``,
                 ``precision``, ``accelerator``).
@@ -1121,6 +1126,7 @@ class CellPin(pl.LightningModule):
             freeze_pretrained=freeze_pretrained,
             max_epochs=train_epochs,
             output_dir=f"{output_dir}/train",
+            decoder_warm_unfreeze_epoch=decoder_warm_unfreeze_epoch,
             **shared,
         )
 
