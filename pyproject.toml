@@ -38,6 +38,9 @@ dependencies = [
   #"torch>=2.9.1",
   #"flash-attn>=2.8.3",
 ]
+optional-dependencies.spatial = [
+  "spatialdata",
+]
 optional-dependencies.dev = [
   "pre-commit",
   "twine>=4.0.2",

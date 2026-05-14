@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 
 import anndata as ad
 import numpy as np
+
+from cellpin._sdata_utils import _resolve_sdata
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
@@ -24,8 +26,11 @@ def label_transfer(
     k: int = 15,
     test_size: float = 0.2,
     random_state: int = 42,
+    table_key: str = "table",
 ) -> tuple[float, ad.AnnData]:
     from cellpin.dataset import scAnnDataset, stAnnDataset
+
+    sp_adata, sdata = _resolve_sdata(sp_adata, table_key)
 
     if cell_type_col not in sc_adata.obs.columns:
         raise ValueError(f"Column {cell_type_col!r} not found in sc_adata.obs")
@@ -83,4 +88,6 @@ def label_transfer(
     sp_adata.obs["cellpin_annotation_certainty"] = max_proba.astype(np.float32)
 
     print("[label_transfer] Annotation complete. Annotations stored in sp_adata.obs['cellpin_annotation']")
+    if sdata is not None:
+        return accuracy, sdata
     return accuracy, sp_adata

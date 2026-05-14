@@ -7,6 +7,7 @@ from typing import Optional
 import anndata as ad
 import numpy as np
 
+from cellpin._sdata_utils import _resolve_sdata
 from cellpin.dataset import scAnnDataset, stAnnDataset
 
 _SEP = "=" * 60
@@ -24,6 +25,7 @@ def setup_data(
     gene_symbols: str | None = None,
     layer: str | None = None,
     batch_key: str | None = None,
+    table_key: str = "table",
 ) -> tuple[scAnnDataset, stAnnDataset]:
     """
     Prepare aligned single-cell and spatial datasets for CellPin.
@@ -36,6 +38,8 @@ def setup_data(
     print(_SEP)
     print("[cellpin.pp.setup] Setting up CellPin datasets")
     print(_SEP)
+
+    st_adata, _ = _resolve_sdata(st_adata, table_key)
 
     sc_genes = _get_gene_names(sc_adata, gene_symbols)
     st_genes = _get_gene_names(st_adata, gene_symbols)
@@ -204,6 +208,7 @@ def setup(
     layer: str | None = None,
     gene_symbols: str | None = None,
     batch_key: str | None = None,
+    table_key: str = "table",
 ) -> tuple[scAnnDataset, stAnnDataset]:
     """Set up aligned sc and spatial datasets for CellPin.
 
@@ -211,13 +216,16 @@ def setup(
 
     Args:
         sc_adata: Single-cell AnnData (full gene panel, used as reference).
-        st_adata: Spatial AnnData (panel genes only, used for imputation).
+        st_adata: Spatial AnnData or :class:`spatialdata.SpatialData` (panel genes only,
+            used for imputation). If a SpatialData object is passed, the AnnData is
+            extracted from ``st_adata.tables[table_key]`` automatically.
         layer: Layer key to read counts from (``None`` → use ``.X``).
         gene_symbols: ``adata.var`` column with gene names (``None`` → ``var_names``).
         batch_key: ``adata.obs`` column with batch labels for decoder conditioning.
             ``None`` (default) disables batch correction. Must be a column in
             ``sc_adata.obs``; spatial data receives a soft uniform one-hot at
             inference time.
+        table_key: Table name to extract from a SpatialData object (default ``"table"``).
 
     Returns:
         ``(sc_dataset, st_dataset)`` ready to pass to :class:`~cellpin.models.CellPin`.
@@ -226,6 +234,8 @@ def setup(
 
         sc_dataset, st_dataset = cellpin.pp.setup(sc_adata, st_adata, layer="counts",
                                                    batch_key="Sample_ID")
+        # also works with SpatialData
+        sc_dataset, st_dataset = cellpin.pp.setup(sc_adata, sdata)
     """
     return setup_data(
         sc_adata=sc_adata,
@@ -233,4 +243,5 @@ def setup(
         gene_symbols=gene_symbols,
         layer=layer,
         batch_key=batch_key,
+        table_key=table_key,
     )

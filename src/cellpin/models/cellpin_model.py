@@ -35,6 +35,7 @@ import torch.nn.functional as F
 from rich.progress import track
 from torch.distributions import Normal, kl_divergence as kl
 
+from cellpin._sdata_utils import _resolve_sdata
 from cellpin.dataset import scAnnDataset
 from cellpin.models.vae import CellPinVAE
 from cellpin.models.utils import (
@@ -1025,13 +1026,16 @@ class CellPin(pl.LightningModule):
         mc_impute: bool = False,
         mc_samples: int = 50,
         mask_fraction: float = 0.2,
+        table_key: str = "table",
     ) -> ad.AnnData:
         """Impute full-gene expression and return as AnnData.
 
         Args:
             dataloader: DataLoader to run inference on.
-            obs_adata: Optional AnnData whose ``.obs`` is copied to the output.
-                Must have the same number of observations.
+            obs_adata: Optional AnnData (or :class:`spatialdata.SpatialData`) whose
+                ``.obs`` is copied to the output. If SpatialData, the AnnData is read
+                from ``obs_adata.tables[table_key]`` and the result is returned as an
+                updated SpatialData object.  Must have the same number of observations.
             use_mean: Use posterior mean for the latent (deterministic).
                 Ignored when ``mc_impute=True``.
             mc_impute: Use MC averaging over ``mc_samples`` stochastic forward
@@ -1039,14 +1043,19 @@ class CellPin(pl.LightningModule):
             mc_samples: Number of MC samples (default 50).
             mask_fraction: Fraction of panel genes randomly zeroed per MC pass
                 (default 0.2).
+            table_key: Table name to read/write when ``obs_adata`` is a SpatialData
+                object (default ``"table"``).
 
         Returns:
             :class:`anndata.AnnData` with ``X`` = imputed counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']``.
+            If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
+            with the result stored in ``sdata.tables[table_key]``.
 
         Raises:
             ValueError: If ``obs_adata`` has the wrong number of cells.
         """
+        obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
         embeddings, imputed_arr, _ = self.embed_and_impute(
             dataloader,
             use_mean=use_mean,
@@ -1056,6 +1065,9 @@ class CellPin(pl.LightningModule):
         )
         adata_out = self._build_output_anndata(imputed_arr, embeddings, obs_adata)
         adata_out.layers["imputed"] = adata_out.X.copy()
+        if sdata is not None:
+            sdata.tables[table_key] = adata_out
+            return sdata
         return adata_out
 
 
@@ -1142,6 +1154,7 @@ class CellPin(pl.LightningModule):
         area_key: str | None = None,
         nb_count_samples: int = 100,
         return_int: bool = False,
+        table_key: str = "table",
     ) -> ad.AnnData:
         """Impute with MC averaging and optional count-space normalisation.
 
@@ -1152,8 +1165,10 @@ class CellPin(pl.LightningModule):
 
         Args:
             dataloader: DataLoader to run inference on.
-            obs_adata: Optional AnnData whose ``.obs`` is copied to the output.
-                Must have the same number of observations.
+            obs_adata: Optional AnnData (or :class:`spatialdata.SpatialData`) whose
+                ``.obs`` is copied to the output. If SpatialData, the AnnData is read
+                from ``obs_adata.tables[table_key]`` and the result is returned as an
+                updated SpatialData object.  Must have the same number of observations.
             mc_samples: Number of stochastic forward passes for MC averaging
                 (default 50; more → smoother but slower).
             mask_fraction: Fraction of panel genes randomly zeroed per MC pass
@@ -1172,17 +1187,22 @@ class CellPin(pl.LightningModule):
                 ``log1p(norm(E[X])) > E[log1p(norm(X))]``; sampling inside the
                 transform corrects this bias.  More samples → lower variance.
             return_int: If ``True``, round ``X`` to integer counts (``int32``).
+            table_key: Table name to read/write when ``obs_adata`` is a SpatialData
+                object (default ``"table"``).
 
         Returns:
             :class:`anndata.AnnData` with ``X`` = imputed (float or int) counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']`` = copy of
             ``X``, and optionally ``layers['imputed_norm']``.
+            If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
+            with the result stored in ``sdata.tables[table_key]``.
 
         Raises:
             ValueError: If ``obs_adata`` has the wrong number of cells, or if
                 ``area_key`` is specified but not found in ``adata.obs``, or if
                 any cell area is ≤ 0.
         """
+        obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
 
         embeddings, counts, log_library = self.embed_and_impute(
             dataloader,
@@ -1243,5 +1263,8 @@ class CellPin(pl.LightningModule):
 
             adata_out.layers["imputed_norm"] = (log1p_acc / K).astype(np.float32)
 
+        if sdata is not None:
+            sdata.tables[table_key] = adata_out
+            return sdata
         return adata_out
 
