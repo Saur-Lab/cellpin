@@ -5,7 +5,6 @@ import torch
 import yaml
 from torch.utils.data import DataLoader, random_split
 
-
 DEFAULT_PARAMS = {
     # Architecture
     "n_latent": 192,
@@ -111,12 +110,12 @@ def build_data_loaders(
         [n_train, n_val],
         generator=torch.Generator().manual_seed(seed),
     )
-    loader_kwargs = dict(
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        persistent_workers=num_workers > 0,
-    )
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "num_workers": num_workers,
+        "pin_memory": True,
+        "persistent_workers": num_workers > 0,
+    }
     train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
     return train_loader, val_loader

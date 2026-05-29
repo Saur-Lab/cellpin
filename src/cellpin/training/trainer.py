@@ -1,8 +1,9 @@
 import logging
 import warnings
 from pathlib import Path
-import torch
+
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
@@ -240,5 +241,3 @@ class CellPinTrainer:
             if isinstance(callback, ModelCheckpoint):
                 return callback.last_model_path
         return None
-
-

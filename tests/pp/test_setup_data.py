@@ -3,12 +3,12 @@ import numpy as np
 import pytest
 
 from cellpin.dataset import scAnnDataset, stAnnDataset
-from cellpin.pp import setup_data, setup
-
+from cellpin.pp import setup, setup_data
 
 # ------------------------------------------------------------------ #
 # Fixtures                                                             #
 # ------------------------------------------------------------------ #
+
 
 @pytest.fixture
 def sc_adata():
@@ -29,6 +29,7 @@ def st_adata():
 # ------------------------------------------------------------------ #
 # Basic sanity (original tests)                                        #
 # ------------------------------------------------------------------ #
+
 
 def test_setup_data_returns_correct_types(sc_adata, st_adata):
     sc_ds, st_ds = setup_data(sc_adata=sc_adata, st_adata=st_adata)
@@ -60,6 +61,7 @@ def test_no_overlap_raises():
 # Duplicate gene detection                                             #
 # ------------------------------------------------------------------ #
 
+
 def test_duplicate_sc_genes_raises():
     sc = ad.AnnData(X=np.ones((2, 3), dtype=np.float32))
     sc.var_names = pd_index_with_dupes(["a", "b", "a"])
@@ -81,6 +83,7 @@ def test_duplicate_st_genes_raises():
 # ------------------------------------------------------------------ #
 # Gene ordering invariant                                              #
 # ------------------------------------------------------------------ #
+
 
 def test_panel_order_sorted_by_sc_position():
     """panel_genes must follow sc_adata position order, not spatial order."""
@@ -110,6 +113,7 @@ def test_panel_idx_is_strictly_ascending():
 # VALUE alignment — the critical end-to-end check                     #
 # ------------------------------------------------------------------ #
 
+
 def test_panel_expr_values_correctly_aligned():
     """
     sc[0] = [1, 2, 3, 4, 5, 6] for genes [a, b, c, d, e, f]
@@ -135,10 +139,8 @@ def test_panel_expr_values_correctly_aligned():
     sc_panel = sc_ds[0]["panel_expr"].numpy()
     st_panel = st_ds[0]["full_expr"].numpy()
 
-    np.testing.assert_array_equal(sc_panel, [1., 2., 4., 6.],
-        err_msg=f"sc panel_expr wrong: {sc_panel}")
-    np.testing.assert_array_equal(st_panel, [10., 20., 40., 60.],
-        err_msg=f"st full_expr wrong: {st_panel}")
+    np.testing.assert_array_equal(sc_panel, [1.0, 2.0, 4.0, 6.0], err_msg=f"sc panel_expr wrong: {sc_panel}")
+    np.testing.assert_array_equal(st_panel, [10.0, 20.0, 40.0, 60.0], err_msg=f"st full_expr wrong: {st_panel}")
 
 
 def test_panel_expr_gene_by_gene_alignment():
@@ -177,6 +179,7 @@ def test_panel_expr_gene_by_gene_alignment():
 # Partial overlap / missing genes                                      #
 # ------------------------------------------------------------------ #
 
+
 def test_missing_st_genes_in_sc_does_not_raise(capsys):
     """Spatial genes absent from sc should be dropped with a warning, not raise."""
     sc = ad.AnnData(X=np.ones((2, 3), dtype=np.float32))
@@ -201,8 +204,8 @@ def test_panel_genes_also_subset_of_sc_genes(sc_adata, st_adata):
 # gene_symbols parameter                                               #
 # ------------------------------------------------------------------ #
 
+
 def test_with_gene_symbols():
-    import pandas as pd
     sc = ad.AnnData(X=np.ones((2, 3), dtype=np.float32))
     sc.var["symbol"] = ["a", "b", "c"]
     st = ad.AnnData(X=np.ones((2, 2), dtype=np.float32))
@@ -217,6 +220,7 @@ def test_with_gene_symbols():
 # setup() alias                                                        #
 # ------------------------------------------------------------------ #
 
+
 def test_setup_alias_is_equivalent(sc_adata, st_adata):
     sc_ds1, st_ds1 = setup_data(sc_adata=sc_adata, st_adata=st_adata)
     sc_ds2, st_ds2 = setup(sc_adata=sc_adata, st_adata=st_adata)
@@ -230,7 +234,9 @@ def test_setup_alias_is_equivalent(sc_adata, st_adata):
 # Helpers                                                              #
 # ------------------------------------------------------------------ #
 
+
 def pd_index_with_dupes(names: list[str]):
     """Return a pandas Index that allows duplicate entries (for testing)."""
     import pandas as pd
+
     return pd.Index(names)

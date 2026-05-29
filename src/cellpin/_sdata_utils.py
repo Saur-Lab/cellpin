@@ -21,9 +21,6 @@ def _resolve_sdata(
         return obj, None
     if isinstance(obj, sd.SpatialData):
         if table_key not in obj.tables:
-            raise ValueError(
-                f"SpatialData has no table '{table_key}'. "
-                f"Available tables: {list(obj.tables.keys())}"
-            )
+            raise ValueError(f"SpatialData has no table '{table_key}'. Available tables: {list(obj.tables.keys())}")
         return obj.tables[table_key], obj
     return obj, None

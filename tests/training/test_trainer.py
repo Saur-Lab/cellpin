@@ -1,6 +1,5 @@
 """Tests for the trainer wrapper using the current CellPin API."""
 
-import pytest
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 
 from cellpin.training import CellPinTrainer

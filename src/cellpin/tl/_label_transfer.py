@@ -4,8 +4,6 @@ from typing import TYPE_CHECKING
 
 import anndata as ad
 import numpy as np
-
-from cellpin._sdata_utils import _resolve_sdata
 import pandas as pd
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
@@ -13,12 +11,14 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import LabelEncoder
 from torch.utils.data import DataLoader
 
+from cellpin._sdata_utils import _resolve_sdata
+
 if TYPE_CHECKING:
     from cellpin.models import CellPin
 
 
 def label_transfer(
-    model: "CellPin",
+    model: CellPin,
     sc_adata: ad.AnnData,
     cell_type_col: str,
     sp_adata: ad.AnnData,
@@ -60,7 +60,11 @@ def label_transfer(
     print(f"\n[label_transfer] {n_classes} cell type classes")
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=y,
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y,
     )
     print(f"[label_transfer] Train: {len(X_train)} | Test: {len(X_test)}")
 

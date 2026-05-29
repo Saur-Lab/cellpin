@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Neural network building blocks for CellPin VAE models.
 
@@ -19,17 +18,17 @@ Utilities:
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 
-
 # ===========================================================================
 # Utilities
 # ===========================================================================
+
 
 def one_hot(index: torch.Tensor, n_cat: int) -> torch.Tensor:
     """One-hot encode an integer index tensor.
@@ -38,7 +37,8 @@ def one_hot(index: torch.Tensor, n_cat: int) -> torch.Tensor:
         index: Integer tensor of shape ``(batch,)``.
         n_cat: Number of categories.
 
-    Returns:
+    Returns
+    -------
         Float tensor of shape ``(batch, n_cat)``.
     """
     onehot = torch.zeros(index.size(0), n_cat, device=index.device, dtype=torch.float32)
@@ -57,9 +57,11 @@ def _resolve_cat(cat: torch.Tensor, n_cat: int) -> torch.Tensor:
         return cat
     return one_hot(cat, n_cat)
 
+
 # ===========================================================================
-#  Encoder building blocks 
+#  Encoder building blocks
 # ===========================================================================
+
 
 class DropPath(nn.Module):
     """Stochastic depth / DropPath (per-sample).
@@ -76,6 +78,7 @@ class DropPath(nn.Module):
         self.drop_prob = float(drop_prob)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply stochastic depth to the input tensor."""
         if self.drop_prob == 0.0 or not self.training:
             return x
         keep_prob = 1.0 - self.drop_prob
@@ -98,12 +101,14 @@ class GEGLU(nn.Module):
         self.act = nn.GELU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply GEGLU activation to the input tensor."""
         a, b = self.proj(x).chunk(2, dim=-1)
         return a * self.act(b)
 
 
 class ResidualMLPBlock(nn.Module):
     """Pre-norm residual block with GEGLU FFN, LayerScale, and DropPath.
+
     Args:
         dim: Hidden dimensionality (input = output).
         expansion: GEGLU inner dimension multiplier.
@@ -132,6 +137,7 @@ class ResidualMLPBlock(nn.Module):
         self.layer_scale = nn.Parameter(torch.ones(dim) * layer_scale_init)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the residual block forward pass."""
         h = self.ff(self.norm(x))
         return x + self.drop_path(h * self.layer_scale)
 
@@ -184,16 +190,16 @@ class ViewMLPEncoder(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Encode a single-view expression vector."""
         if x.size(-1) != self.input_dim:
-            raise ValueError(
-                f"ViewMLPEncoder: expected input_dim={self.input_dim}, got {x.size(-1)}"
-            )
+            raise ValueError(f"ViewMLPEncoder: expected input_dim={self.input_dim}, got {x.size(-1)}")
         return self.net(x)
 
 
 # ===========================================================================
-# VAE Encoder 
+# VAE Encoder
 # ===========================================================================
+
 
 class Encoder(nn.Module):
     """VAE encoder: ``ViewMLPEncoder`` body + mean/var/reparameterisation heads.
@@ -247,15 +253,14 @@ class Encoder(nn.Module):
         else:
             self.z_transformation = nn.Identity()
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encode ``x`` to posterior parameters and a reparameterised sample.
 
         Args:
             x: Expression tensor ``(batch, n_input)``.
 
-        Returns:
+        Returns
+        -------
             ``(q_mean, q_var, z)`` — posterior mean, variance, and sample.
         """
         if self.training and self.input_noise_std > 0.0:
@@ -271,8 +276,9 @@ class Encoder(nn.Module):
 
 
 # ===========================================================================
-# Decoder building blocks 
+# Decoder building blocks
 # ===========================================================================
+
 
 class FCLayers(nn.Module):
     """Flexible fully-connected layer stack (scVI-style).
@@ -330,11 +336,13 @@ class FCLayers(nn.Module):
         self.fc_layers = nn.Sequential(*layers_list)
 
     def inject_into_layer(self, layer_num: int) -> bool:
+        """Return True if covariates should be injected at this layer."""
         return layer_num == 0 or self.inject_covariates
 
     def forward(self, x: torch.Tensor, *cat_list: torch.Tensor) -> torch.Tensor:
+        """Forward pass through the FC stack with optional covariates."""
         one_hot_cats = []
-        for n_cat, cat in zip(self.n_cat_list, cat_list):
+        for n_cat, cat in zip(self.n_cat_list, cat_list, strict=False):
             if n_cat > 1:
                 one_hot_cats.append(_resolve_cat(cat, n_cat))
 
@@ -376,9 +384,7 @@ class DecoderSCVI(nn.Module):
             n_hidden=n_hidden,
             dropout_rate=0.0,
         )
-        self.px_scale_decoder = nn.Sequential(
-            nn.Linear(n_hidden, n_output), nn.Softmax(dim=-1)
-        )
+        self.px_scale_decoder = nn.Sequential(nn.Linear(n_hidden, n_output), nn.Softmax(dim=-1))
         self.px_r_decoder = nn.Linear(n_hidden, n_output)
         self.px_dropout_decoder = nn.Linear(n_hidden, n_output)
 
@@ -397,7 +403,8 @@ class DecoderSCVI(nn.Module):
             library: Log-library tensor ``(batch, 1)``.
             *cat_list: Optional categorical covariates.
 
-        Returns:
+        Returns
+        -------
             ``(px_scale, px_r, px_rate, px_dropout)``
         """
         px = self.px_decoder(z, *cat_list)
@@ -454,7 +461,8 @@ class DecoderNormal(nn.Module):
             z: Latent tensor ``(batch, n_latent)``.
             *cat_list: Optional categorical covariates.
 
-        Returns:
+        Returns
+        -------
             ``(px_mu, px_sigma2, px_dropout)``:
             - ``px_mu``: predicted mean per gene.
             - ``px_sigma2``: predicted variance per gene (softplus of raw logvar).
@@ -465,5 +473,3 @@ class DecoderNormal(nn.Module):
         px_sigma2 = F.softplus(self.px_logvar_decoder(px))
         px_dropout = self.px_dropout_decoder(px)
         return px_mu, px_sigma2, px_dropout
-
-

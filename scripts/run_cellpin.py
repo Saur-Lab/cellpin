@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""
-run_cellpin.py
-==============
-Simple CellPin training and spatial imputation
+"""Simple CellPin training and spatial imputation.
 
-Returns an anndata object containing both the original spatial data and the imputed values + CellPin embeddings.
+Returns an anndata object containing both the original spatial data and the
+imputed values + CellPin embeddings.
 
 Usage
 -----
@@ -22,11 +20,10 @@ from pathlib import Path
 import anndata as ad
 import yaml
 from torch.utils.data import DataLoader
+
 import cellpin
 import cellpin.pp
 from cellpin.models import CellPin
-from cellpin.training import CorrelationCallback
-
 
 #  Model config (YAML)
 
@@ -34,11 +31,13 @@ CONFIG_PATH_DEFAULT = Path(__file__).resolve().parents[1] / "configs" / "cellpin
 
 
 def load_model_config(config_path: Path) -> dict:
+    """Load a YAML model configuration file."""
     with config_path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
 def run(args: argparse.Namespace) -> None:
+    """Run two-stage training and spatial imputation."""
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = Path(args.config).expanduser() if args.config else CONFIG_PATH_DEFAULT
@@ -69,17 +68,17 @@ def run(args: argparse.Namespace) -> None:
     # ── Create model ───────────────────────────────────────────────────────
     model = CellPin(sc_dataset=sc_dataset, config=model_config)
 
-    shared = dict(
-        precision=args.precision,
-        accelerator="auto",
-        devices=args.devices,
-        strategy=args.strategy,
-        seed=args.seed,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        gradient_clip_val=0.5,
-        early_stopping_patience=args.early_stopping_patience,
-    )
+    shared = {
+        "precision": args.precision,
+        "accelerator": "auto",
+        "devices": args.devices,
+        "strategy": args.strategy,
+        "seed": args.seed,
+        "batch_size": args.batch_size,
+        "num_workers": args.num_workers,
+        "gradient_clip_val": 0.5,
+        "early_stopping_patience": args.early_stopping_patience,
+    }
 
     # ── Stage 1: pretrain ──────────────────────────────────────────────────
     print("\nStage 1: pretraining...")
@@ -104,8 +103,10 @@ def run(args: argparse.Namespace) -> None:
     # ── Inference on spatial data ──────────────────────────────────────────
     print("\nRunning imputation on spatial data...")
     dl = DataLoader(
-        st_dataset, batch_size=args.batch_size,
-        shuffle=False, num_workers=args.num_workers,
+        st_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
     )
     adata_imputed = model.impute(dl, obs_adata=adata_sp, return_norm=False, nb_count_samples=20, return_int=False)
 
@@ -115,29 +116,30 @@ def run(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for the training script."""
     p = argparse.ArgumentParser(
         description="CellPin: two-stage training + spatial imputation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    p.add_argument("--adata_path",   required=True, help="scRNA AnnData (.h5ad)")
+    p.add_argument("--adata_path", required=True, help="scRNA AnnData (.h5ad)")
     p.add_argument("--spatial_path", required=True, help="Spatial AnnData (.h5ad)")
-    p.add_argument("--output_dir",   default="./experiments/cellpin_run")
-    p.add_argument("--config",       default=None, help=f"Path to model YAML config (default: {CONFIG_PATH_DEFAULT})")
-    p.add_argument("--layer",        default="counts", help="Expression layer (empty → .X)")
+    p.add_argument("--output_dir", default="./experiments/cellpin_run")
+    p.add_argument("--config", default=None, help=f"Path to model YAML config (default: {CONFIG_PATH_DEFAULT})")
+    p.add_argument("--layer", default="counts", help="Expression layer (empty → .X)")
 
     p.add_argument("--pretrain_epochs", type=int, default=50)
-    p.add_argument("--train_epochs",    type=int, default=60)
-    p.add_argument("--batch_size",      type=int, default=256)
-    p.add_argument("--num_workers",     type=int, default=8)
+    p.add_argument("--train_epochs", type=int, default=60)
+    p.add_argument("--batch_size", type=int, default=256)
+    p.add_argument("--num_workers", type=int, default=8)
     p.add_argument("--early_stopping_patience", type=int, default=12)
 
-    p.add_argument("--freeze_pretrained",             action=argparse.BooleanOptionalAction, default=False)
-    p.add_argument("--decoder_warm_unfreeze_epoch",   type=int, default=25)
+    p.add_argument("--freeze_pretrained", action=argparse.BooleanOptionalAction, default=False)
+    p.add_argument("--decoder_warm_unfreeze_epoch", type=int, default=25)
 
     p.add_argument("--precision", default="16-mixed")
-    p.add_argument("--devices",   type=int, nargs="+", default=[0])
-    p.add_argument("--strategy",  default="auto")
-    p.add_argument("--seed",      type=int, default=42)
+    p.add_argument("--devices", type=int, nargs="+", default=[0])
+    p.add_argument("--strategy", default="auto")
+    p.add_argument("--seed", type=int, default=42)
     return p.parse_args()
 
 

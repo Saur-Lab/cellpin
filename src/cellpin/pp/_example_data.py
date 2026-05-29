@@ -47,7 +47,8 @@ def load_sc_example(
         force_download: If ``True``, always re-download the file even when a
             cached copy exists.
 
-    Returns:
+    Returns
+    -------
         Loaded single-cell example ``AnnData``.
     """
     path = _download_if_needed(
@@ -74,7 +75,8 @@ def load_sp_example(
         force_download: If ``True``, always re-download the file even when a
             cached copy exists.
 
-    Returns:
+    Returns
+    -------
         Loaded spatial example ``AnnData``.
     """
     path = _download_if_needed(

@@ -3,12 +3,10 @@
 import anndata as ad
 import numpy as np
 import pytest
-import torch
 from torch.utils.data import DataLoader
 
 from cellpin.models import CellPin
 from cellpin.pp import setup_data
-
 
 MINIMAL_CONFIG = {
     "n_latent": 4,

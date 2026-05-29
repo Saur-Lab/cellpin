@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import pathlib
 from collections import Counter
-from typing import Optional
 
 import anndata as ad
 import numpy as np
@@ -13,7 +11,7 @@ from cellpin.dataset import scAnnDataset, stAnnDataset
 _SEP = "=" * 60
 
 
-def _get_gene_names(adata: ad.AnnData, gene_symbols: Optional[str]) -> np.ndarray:
+def _get_gene_names(adata: ad.AnnData, gene_symbols: str | None) -> np.ndarray:
     if gene_symbols is not None:
         return adata.var[gene_symbols].astype(str).to_numpy()
     return adata.var_names.astype(str).to_numpy()
@@ -44,20 +42,15 @@ def setup_data(
     sc_genes = _get_gene_names(sc_adata, gene_symbols)
     st_genes = _get_gene_names(st_adata, gene_symbols)
     sc_set = set(sc_genes.tolist())
-    st_set = set(st_genes.tolist())
 
-    print(
-        f"[cellpin.pp.setup] sc_adata : {sc_adata.n_obs:>8,} cells  × {len(sc_genes):>8,} genes"
-    )
-    print(
-        f"[cellpin.pp.setup] st_adata : {st_adata.n_obs:>8,} cells  × {len(st_genes):>8,} spatial genes"
-    )
+    print(f"[cellpin.pp.setup] sc_adata : {sc_adata.n_obs:>8,} cells  × {len(sc_genes):>8,} genes")
+    print(f"[cellpin.pp.setup] st_adata : {st_adata.n_obs:>8,} cells  × {len(st_genes):>8,} spatial genes")
     if gene_symbols is not None:
         print(f"[cellpin.pp.setup] Gene IDs taken from var['{gene_symbols}']")
     if layer is not None:
         print(f"[cellpin.pp.setup] Expression read from layer='{layer}'")
 
-    #check for duplicate gene names
+    # check for duplicate gene names
     sc_counts = Counter(sc_genes.tolist())
     sc_dupes = sorted(g for g, n in sc_counts.items() if n > 1)
     if sc_dupes:
@@ -77,8 +70,7 @@ def setup_data(
         print(
             f"[cellpin.pp.setup] WARNING: {len(missing_from_sc)} spatial gene(s) not found "
             f"in sc_adata — will be dropped:\n"
-            f"  {missing_from_sc[:10]}"
-            + (" ..." if len(missing_from_sc) > 10 else "")
+            f"  {missing_from_sc[:10]}" + (" ..." if len(missing_from_sc) > 10 else "")
         )
 
     panel_genes_sp_order: list[str] = []
@@ -106,10 +98,7 @@ def setup_data(
     n_imputed_only = len(sc_genes) - n_panel
     overlap_pct = 100.0 * n_panel / len(st_genes)
 
-    print(
-        f"[cellpin.pp.setup] Panel    : {n_panel:,} genes overlap "
-        f"({overlap_pct:.1f}% of spatial genes retained)"
-    )
+    print(f"[cellpin.pp.setup] Panel    : {n_panel:,} genes overlap ({overlap_pct:.1f}% of spatial genes retained)")
     print(
         f"[cellpin.pp.setup] Imputed  : {len(sc_genes):,} genes total in sc space "
         f"({n_imputed_only:,} genes to impute, not in panel)"
@@ -163,7 +152,7 @@ def setup_data(
             )
 
     # 4. panel_idx values must map to the correct gene names
-    for k, (idx, gene) in enumerate(zip(sc_dataset.panel_idx.tolist(), panel_genes)):
+    for k, (idx, gene) in enumerate(zip(sc_dataset.panel_idx.tolist(), panel_genes, strict=False)):
         actual = sc_dataset.gene_names[idx]
         if actual != gene:
             raise ValueError(
@@ -193,10 +182,7 @@ def setup_data(
         f"{len(sc_dataset.gene_names):,} genes total, "
         f"{len(sc_dataset.panel_genes):,} panel genes"
     )
-    print(
-        f"[cellpin.pp.setup] st_dataset: {len(st_dataset):,} cells, "
-        f"{len(st_dataset.panel_genes):,} panel genes"
-    )
+    print(f"[cellpin.pp.setup] st_dataset: {len(st_dataset):,} cells, {len(st_dataset.panel_genes):,} panel genes")
 
     return sc_dataset, st_dataset
 
@@ -227,13 +213,15 @@ def setup(
             inference time.
         table_key: Table name to extract from a SpatialData object (default ``"table"``).
 
-    Returns:
+    Returns
+    -------
         ``(sc_dataset, st_dataset)`` ready to pass to :class:`~cellpin.models.CellPin`.
 
     Example::
 
-        sc_dataset, st_dataset = cellpin.pp.setup(sc_adata, st_adata, layer="counts",
-                                                   batch_key="Sample_ID")
+        sc_dataset, st_dataset = cellpin.pp.setup(
+            sc_adata, st_adata, layer="counts", batch_key="Sample_ID"
+        )
         # also works with SpatialData
         sc_dataset, st_dataset = cellpin.pp.setup(sc_adata, sdata)
     """

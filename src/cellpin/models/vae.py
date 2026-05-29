@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 CellPin hybrid VAE models.
 
@@ -11,13 +10,13 @@ CellPin hybrid VAE models.
 
 from __future__ import annotations
 
-from typing import Dict, Literal, Tuple
+from typing import Literal
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Normal, kl_divergence as kl
+from torch.distributions import Normal
+from torch.distributions import kl_divergence as kl
 
 from cellpin.models.distributions import (
     NegativeBinomial,
@@ -39,6 +38,7 @@ torch.backends.cudnn.benchmark = True
 # ===========================================================================
 # CellPinVAE
 # ===========================================================================
+
 
 class CellPinVAE(nn.Module):
     """Hybrid two-view VAE for single-cell and spatial transcriptomics.
@@ -143,22 +143,20 @@ class CellPinVAE(nn.Module):
         elif dispersion == "gene-cell":
             pass  # predicted by decoder per cell
         else:
-            raise ValueError(
-                f"dispersion must be one of ['gene', 'gene-cell'], got '{dispersion}'."
-            )
+            raise ValueError(f"dispersion must be one of ['gene', 'gene-cell'], got '{dispersion}'.")
 
         # ------------------------------------------------------------------
         # Shared encoder kwargs (all residual MLP encoders use same settings)
         # ------------------------------------------------------------------
-        enc_kwargs = dict(
-            n_hidden=n_hidden,
-            n_layers=n_layers_encoder,
-            dropout_rate=dropout_rate,
-            drop_path_rate=drop_path_rate,
-            ffn_expansion=ffn_expansion,
-            layer_scale_init=layer_scale_init,
-            distribution=latent_distribution,
-        )
+        enc_kwargs = {
+            "n_hidden": n_hidden,
+            "n_layers": n_layers_encoder,
+            "dropout_rate": dropout_rate,
+            "drop_path_rate": drop_path_rate,
+            "ffn_expansion": ffn_expansion,
+            "layer_scale_init": layer_scale_init,
+            "distribution": latent_distribution,
+        }
 
         # View 1: full-gene encoder (reference geometry)
         self.z_encoder_full = Encoder(
@@ -181,7 +179,7 @@ class CellPinVAE(nn.Module):
             n_input=n_input_panel,
             n_output=1,
             n_hidden=n_hidden,
-            n_layers=1,        # intentionally shallow
+            n_layers=1,  # intentionally shallow
             dropout_rate=dropout_rate,
             distribution="normal",
             # input_noise_std intentionally omitted → defaults to 0.0
@@ -219,15 +217,10 @@ class CellPinVAE(nn.Module):
         """
         if batch_index is None or self.n_batch == 0:
             return None
-        return batch_index  # long (B,) → FCLayers._resolve_cat → one_hot
+        return batch_index
 
     def _get_infer_batch_cat(self, n_cells: int, device: torch.device) -> torch.Tensor | None:
-        """Return the batch covariate for spatial inference (no batch label known).
-
-        ``batch_infer_mode='mean_onehot'`` (default): uniform soft one-hot of
-        shape ``(n_cells, n_batch)``, each row = 1/n_batch.  Passed as a float
-        tensor so FCLayers skips one_hot conversion.
-        """
+        """Return a batch covariate for inference when labels are missing."""
         if self.n_batch == 0:
             return None
         if self.batch_infer_mode == "mean_onehot":
@@ -258,7 +251,8 @@ class CellPinVAE(nn.Module):
             give_mean: Return the posterior mean rather than a sample.
             n_samples: MC samples for log-normal mean approximation.
 
-        Returns:
+        Returns
+        -------
             Latent tensor ``(batch, n_latent)``.
         """
         if self.log_variational:
@@ -284,7 +278,8 @@ class CellPinVAE(nn.Module):
         Args:
             x: Panel expression tensor ``(batch, n_input_panel)``.
 
-        Returns:
+        Returns
+        -------
             Library sample ``(batch, 1)``.
         """
         if self.log_variational:
@@ -313,12 +308,16 @@ class CellPinVAE(nn.Module):
             n_samples: Number of posterior samples to average.
             transform_batch: Decode under this batch instead of ``batch_index``.
 
-        Returns:
+        Returns
+        -------
             Scale tensor ``(batch, n_input_full)``.
         """
         return self.inference(
-            x, x_panel=x_panel, batch_index=batch_index,
-            n_samples=n_samples, transform_batch=transform_batch,
+            x,
+            x_panel=x_panel,
+            batch_index=batch_index,
+            n_samples=n_samples,
+            transform_batch=transform_batch,
         )["px_scale"]
 
     def get_sample_rate(
@@ -338,12 +337,16 @@ class CellPinVAE(nn.Module):
             n_samples: Number of posterior samples.
             transform_batch: Decode under this batch instead of ``batch_index``.
 
-        Returns:
+        Returns
+        -------
             Rate tensor ``(batch, n_input_full)``.
         """
         return self.inference(
-            x, x_panel=x_panel, batch_index=batch_index,
-            n_samples=n_samples, transform_batch=transform_batch,
+            x,
+            x_panel=x_panel,
+            batch_index=batch_index,
+            n_samples=n_samples,
+            transform_batch=transform_batch,
         )["px_rate"]
 
     # ------------------------------------------------------------------
@@ -369,13 +372,12 @@ class CellPinVAE(nn.Module):
             - ``px_r``: predicted variance σ² (softplus-transformed).
             - ``px_dropout``: ZIN zero-inflation logits (ignored for ``'normal'``).
 
-        Returns:
+        Returns
+        -------
             Per-cell NLL ``(batch,)``.
         """
         if self.reconstruction_loss == "zinb":
-            per_gene = -ZeroInflatedNegativeBinomial(
-                mu=px_rate, theta=px_r, zi_logits=px_dropout
-            ).log_prob(x)
+            per_gene = -ZeroInflatedNegativeBinomial(mu=px_rate, theta=px_r, zi_logits=px_dropout).log_prob(x)
         elif self.reconstruction_loss == "nb":
             per_gene = -NegativeBinomial(mu=px_rate, theta=px_r).log_prob(x)
         elif self.reconstruction_loss == "poisson":
@@ -383,9 +385,7 @@ class CellPinVAE(nn.Module):
         elif self.reconstruction_loss == "normal":
             per_gene = -Normal(px_rate, (px_r + 1e-8).sqrt()).log_prob(x)
         elif self.reconstruction_loss == "zin":
-            per_gene = -ZeroInflatedNormal(
-                mu=px_rate, sigma2=px_r, zi_logits=px_dropout
-            ).log_prob(x)
+            per_gene = -ZeroInflatedNormal(mu=px_rate, sigma2=px_r, zi_logits=px_dropout).log_prob(x)
         else:
             raise ValueError(f"Unknown reconstruction_loss: '{self.reconstruction_loss}'")
 
@@ -403,7 +403,7 @@ class CellPinVAE(nn.Module):
         batch_index: torch.Tensor | None = None,
         n_samples: int = 1,
         transform_batch: int | None = None,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> dict[str, torch.Tensor]:
         """Run encoders and decoder; return all intermediate tensors.
 
         ``z`` is inferred from the selected encoder view, while library is
@@ -418,7 +418,8 @@ class CellPinVAE(nn.Module):
             n_samples: Draw multiple posterior samples (expand batch dim).
             transform_batch: Override batch index for the decoder.
 
-        Returns:
+        Returns
+        -------
             Dict with keys:
             ``px_scale``, ``px_r``, ``px_rate``, ``px_dropout``,
             ``qz_m``, ``qz_v``, ``z``,
@@ -428,10 +429,7 @@ class CellPinVAE(nn.Module):
             if self.panel_idx is not None:
                 x_panel = x.index_select(1, self.panel_idx.to(x.device))
             elif self.use_panel_only:
-                raise ValueError(
-                    "Panel input required for panel-only mode. "
-                    "Pass x_panel or provide panel_idx at init."
-                )
+                raise ValueError("Panel input required for panel-only mode. Pass x_panel or provide panel_idx at init.")
             else:
                 raise ValueError("x_panel is required.")
 
@@ -465,11 +463,7 @@ class CellPinVAE(nn.Module):
             library = Normal(ql_m, ql_v.sqrt()).rsample()
 
         # ---- Decode ----
-        dec_batch = (
-            transform_batch * torch.ones_like(batch_index)
-            if transform_batch is not None
-            else batch_index
-        )
+        dec_batch = transform_batch * torch.ones_like(batch_index) if transform_batch is not None else batch_index
         # Spatial inference: no batch label available → use soft one-hot
         if dec_batch is None and self.n_batch > 0:
             _n = z.size(0) if z.ndim == 2 else z.size(1)
@@ -480,9 +474,7 @@ class CellPinVAE(nn.Module):
             px_rate, px_r, px_dropout = self.decoder(z, dec_batch)
             px_scale = px_rate  # alias for API consistency; no softmax scale
         else:
-            px_scale, px_r, px_rate, px_dropout = self.decoder(
-                self.dispersion, z, library, dec_batch
-            )
+            px_scale, px_r, px_rate, px_dropout = self.decoder(self.dispersion, z, library, dec_batch)
             # ---- Resolve dispersion for count-based decoders ----
             if self.dispersion == "gene":
                 px_r = self.px_r
@@ -490,18 +482,18 @@ class CellPinVAE(nn.Module):
             if self.dispersion != "gene-cell":
                 px_r = torch.exp(px_r)
 
-        return dict(
-            px_scale=px_scale,
-            px_r=px_r,
-            px_rate=px_rate,
-            px_dropout=px_dropout,
-            qz_m=qz_m,
-            qz_v=qz_v,
-            z=z,
-            ql_m=ql_m,
-            ql_v=ql_v,
-            library=library,
-        )
+        return {
+            "px_scale": px_scale,
+            "px_r": px_r,
+            "px_rate": px_rate,
+            "px_dropout": px_dropout,
+            "qz_m": qz_m,
+            "qz_v": qz_v,
+            "z": z,
+            "ql_m": ql_m,
+            "ql_v": ql_v,
+            "library": library,
+        }
 
     # ------------------------------------------------------------------
     # Forward: ELBO components
@@ -515,7 +507,7 @@ class CellPinVAE(nn.Module):
         x_panel: torch.Tensor | None = None,
         encoder_view: Literal["panel", "full"] = "panel",
         batch_index: torch.Tensor | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, float]:
+    ) -> tuple[torch.Tensor, torch.Tensor, float]:
         """Compute ELBO components for a mini-batch.
 
         Following the scVI convention the return tuple has three elements so
@@ -531,7 +523,8 @@ class CellPinVAE(nn.Module):
             encoder_view: ``'panel'`` or ``'full'`` for latent inference.
             batch_index: Integer batch labels.
 
-        Returns:
+        Returns
+        -------
             ``(reconst_loss + kl_l, kl_z, 0.0)``
         """
         outputs = self.inference(
@@ -555,7 +548,5 @@ class CellPinVAE(nn.Module):
             Normal(local_l_mean, local_l_var.sqrt()),
         ).sum(dim=1)
 
-        reconst = self.get_reconstruction_loss(
-            x, outputs["px_rate"], outputs["px_r"], outputs["px_dropout"]
-        )
+        reconst = self.get_reconstruction_loss(x, outputs["px_rate"], outputs["px_r"], outputs["px_dropout"])
         return reconst + kl_l, kl_z, 0.0

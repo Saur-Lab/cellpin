@@ -79,9 +79,7 @@ class TestForward:
         x_full, x_panel = batch_tensors
         local_l_mean = torch.zeros(B, 1)
         local_l_var = torch.ones(B, 1)
-        reconst_kl_l, kl_z, _ = vae.forward(
-            x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full"
-        )
+        reconst_kl_l, kl_z, _ = vae.forward(x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full")
         assert reconst_kl_l.shape == (B,)
         assert kl_z.shape == (B,)
 
@@ -89,9 +87,7 @@ class TestForward:
         x_full, x_panel = batch_tensors
         local_l_mean = torch.zeros(B, 1)
         local_l_var = torch.ones(B, 1)
-        reconst_kl_l, kl_z, _ = vae.forward(
-            x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full"
-        )
+        reconst_kl_l, kl_z, _ = vae.forward(x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full")
         assert torch.isfinite(reconst_kl_l).all()
         assert torch.isfinite(kl_z).all()
 
@@ -99,9 +95,7 @@ class TestForward:
         x_full, x_panel = batch_tensors
         local_l_mean = torch.zeros(B, 1)
         local_l_var = torch.ones(B, 1)
-        _, kl_z, _ = vae.forward(
-            x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full"
-        )
+        _, kl_z, _ = vae.forward(x_full, local_l_mean, local_l_var, x_panel=x_panel, encoder_view="full")
         assert (kl_z >= 0).all()
 
 
@@ -127,9 +121,12 @@ class TestReconstructionLoss:
 
     def test_unknown_loss_raises(self):
         vae = CellPinVAE(
-            n_input_full=N_FULL, n_input_panel=N_PANEL,
-            n_hidden=32, n_latent=8,
-            n_layers_encoder=2, n_layers_decoder=1,
+            n_input_full=N_FULL,
+            n_input_panel=N_PANEL,
+            n_hidden=32,
+            n_latent=8,
+            n_layers_encoder=2,
+            n_layers_decoder=1,
         )
         vae.reconstruction_loss = "bad"
         x = torch.rand(B, N_FULL)

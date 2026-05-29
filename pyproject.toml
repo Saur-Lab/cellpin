@@ -1,19 +1,19 @@
 [build-system]
-requires = ["hatchling>=1.0"]
 build-backend = "hatchling.build"
+requires = [ "hatchling" ]
 
 [project]
 name = "cellpin"
 version = "0.0.1"
-description = "VAE-based imputation for spatial transcriptomics using single-cell references"
+description = "Cellpin: A Student–Teacher Variational Model for Spatial Transcriptomics Imputation and Encoding"
 readme = "README.md"
 license = { file = "LICENSE" }
 maintainers = [
-    { name = "Philipp Putze", email = "philipp.putze@tum.de" },
+  { name = "Philipp Putze", email = "philipp.putze@tum.de" },
   { name = "Daniele Lucarelli", email = "daniele.lucarelli@tum.de" }
 ]
 authors = [
-    { name = "Philipp Putze" },
+  { name = "Philipp Putze" },
   { name = "Daniele Lucarelli" }
 ]
 requires-python = ">=3.11"
@@ -26,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "anndata",
+  "session-info2",
   "optuna>=4.7.0",
   "psutil>=7.1.3",
   "pytorch-lightning>=2.5.6",
@@ -35,76 +36,61 @@ dependencies = [
   "session-info2",
   "tensorboard>=2.20.0",
   "zarr<3",
-  #"torch>=2.9.1",
-  #"flash-attn>=2.8.3",
+  "torch>=2.9.1",
+  "spatialdata",
 ]
+
 optional-dependencies.spatial = [
   "spatialdata",
 ]
-optional-dependencies.dev = [
+
+# https://docs.pypi.org/project_metadata/#project-urls
+urls.Documentation = "https://cellpin.readthedocs.io/"
+urls.Homepage = "https://github.com/Saur-Lab/cellpin"
+urls.Source = "ttps://github.com/Saur-Lab/cellpin/cellpin"
+
+[dependency-groups]
+dev = [
   "pre-commit",
   "twine>=4.0.2",
 ]
-optional-dependencies.doc = [
-  "docutils>=0.8,!=0.18.*,!=0.19.*",
+test = [
+  "coverage>=7.10",
+  "pytest",
+  "pytest-cov",
+]
+doc = [
   "ipykernel",
   "ipython",
   "myst-nb>=1.1",
   "pandas",
-  # Until pybtex >0.24.0 releases: https://bitbucket.org/pybtex-devs/pybtex/issues/169/
-  "setuptools",
   "sphinx>=8.1",
   "sphinx-autodoc-typehints",
   "sphinx-book-theme>=1",
   "sphinx-copybutton",
-  "sphinx-tabs",
+  "sphinx-design",
   "sphinxcontrib-bibtex>=1",
+  "sphinxcontrib-katex",
   "sphinxext-opengraph",
 ]
-optional-dependencies.test = [
-  "coverage>=7.10",
-  "pytest",
-  "pytest-cov",     # For VS Code’s coverage functionality
+
+[tool.hatch]
+envs.default.installer = "uv"
+envs.default.dependency-groups = [ "dev" ]
+envs.docs.dependency-groups = [ "doc" ]
+envs.docs.scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
+envs.docs.scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
+envs.docs.scripts.clean = "git clean -fdX -- {args:docs}"
+envs.hatch-test.dependency-groups = [ "dev", "test" ]
+envs.hatch-test.matrix = [
+  # Test the lowest and highest supported Python versions with normal deps
+  { deps = [ "stable" ], python = [ "3.11", "3.14" ] },
+  # Test the newest supported Python version also with pre-release deps
+  { deps = [ "pre" ], python = [ "3.14" ] },
 ]
-# https://docs.pypi.org/project_metadata/#project-urls
-urls.Documentation = "https://cellpin.readthedocs.io/"
-urls.Homepage = "https://github.com/Saur-Lab/cellpin"
-urls.Source = "https://github.com/Saur-Lab/cellpin"
-
-[tool.hatch.envs.default]
-installer = "uv"
-features = ["dev"]
-dev-mode = true
-
-[tool.hatch.envs.default.scripts]
-install-flash = [
-  "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121",
-  "pip install flash-attn --no-build-isolation",
-]
-
-[tool.hatch.envs.docs]
-features = [ "doc" ]
-scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
-scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
-scripts.clean = "git clean -fdX -- {args:docs}"
-
-# Test the lowest and highest supported Python versions with normal deps
-[[tool.hatch.envs.hatch-test.matrix]]
-deps = [ "stable" ]
-python = [ "3.11", "3.14" ]
-
-# Test the newest supported Python version also with pre-release deps
-[[tool.hatch.envs.hatch-test.matrix]]
-deps = [ "pre" ]
-python = [ "3.14" ]
-
-[tool.hatch.envs.hatch-test]
-features = [ "dev", "test" ]
-
-[tool.hatch.envs.hatch-test.overrides]
 # If the matrix variable `deps` is set to "pre",
 # set the environment variable `UV_PRERELEASE` to "allow".
-matrix.deps.env-vars = [
+envs.hatch-test.overrides.matrix.deps.env-vars = [
   { key = "UV_PRERELEASE", value = "allow", if = [ "pre" ] },
 ]
 
@@ -112,9 +98,7 @@ matrix.deps.env-vars = [
 line-length = 120
 src = [ "src" ]
 extend-include = [ "*.ipynb" ]
-
 format.docstring-code-format = true
-
 lint.select = [
   "B",      # flake8-bugbear
   "BLE",    # flake8-blind-except
@@ -148,23 +132,23 @@ lint.per-file-ignores."docs/*" = [ "I" ]
 lint.per-file-ignores."tests/*" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
-[tool.pytest.ini_options]
+[tool.pytest]
+strict = true
 testpaths = [ "tests" ]
-xfail_strict = true
-pythonpath = [ "src" ]
 addopts = [
   "--import-mode=importlib", # allow using test files with same name
 ]
 
-[tool.coverage.run]
-source = [ "cellpin" ]
-patch = [ "subprocess" ]
-omit = [
+[tool.coverage]
+run.omit = [
   "**/test_*.py",
 ]
+run.patch = [ "subprocess" ]
+run.source = [ "cellpin" ]
 
 [tool.cruft]
 skip = [
+  ".git",
   "tests",
   "src/**/__init__.py",
   "src/**/basic.py",
