@@ -51,6 +51,7 @@ def test_sparse_input(adata):
 
 def test_noise_scale_removed(adata):
     import pytest
+
     with pytest.raises(TypeError, match="noise_scale"):
         scAnnDataset(adata=adata, panel=["gene1"], noise_scale=0.1)
 

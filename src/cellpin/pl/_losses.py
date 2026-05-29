@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 
 _COLORS = {
@@ -58,15 +57,8 @@ def _find_csv(log_path: Path) -> Path:
 
 def _load_epoch_df(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    numeric_cols = [
-        c for c in df.select_dtypes(include="number").columns
-        if c != "epoch" and c not in _SKIP
-    ]
-    return (
-        df.groupby("epoch")[numeric_cols]
-        .mean(numeric_only=True)
-        .reset_index()
-    )
+    numeric_cols = [c for c in df.select_dtypes(include="number").columns if c != "epoch" and c not in _SKIP]
+    return df.groupby("epoch")[numeric_cols].mean(numeric_only=True).reset_index()
 
 
 def losses(
@@ -82,7 +74,7 @@ def losses(
     Parameters
     ----------
     log_path:
-        Path to a ``metrics.csv`` file 
+        Path to a ``metrics.csv`` file
     keys:
         Column names to plot, e.g. ``["val_loss", "val_reconst_loss"]``.
         Defaults to ``["val_loss", "val_reconst_loss", "val_inv_loss"]``.
@@ -100,10 +92,7 @@ def losses(
     csv_path = _find_csv(log_path)
     df = _load_epoch_df(csv_path)
 
-    available_val = [
-        c for c in df.columns
-        if c.startswith("val_") and c not in _SKIP and not df[c].isna().all()
-    ]
+    available_val = [c for c in df.columns if c.startswith("val_") and c not in _SKIP and not df[c].isna().all()]
 
     if keys is None:
         keys = [k for k in _DEFAULT_KEYS if k in available_val]
@@ -114,9 +103,7 @@ def losses(
     else:
         missing = [k for k in keys if k not in df.columns]
         if missing:
-            raise ValueError(
-                f"Keys not found in log: {missing}\nAvailable: {list(df.columns)}"
-            )
+            raise ValueError(f"Keys not found in log: {missing}\nAvailable: {list(df.columns)}")
 
     if not keys:
         raise ValueError(f"No plottable loss columns found. Available: {list(df.columns)}")
@@ -134,14 +121,15 @@ def losses(
             return s
         return s.rolling(window=smooth, center=True, min_periods=1).mean()
 
-    for ax, key in zip(axes_flat, keys):
+    for ax, key in zip(axes_flat, keys, strict=False):
         color = _COLORS.get(key, "#555555")
         label = _LABELS.get(key, key.replace("_", " "))
         series = df.get(key)
 
         if series is None or series.isna().all():
-            ax.text(0.5, 0.5, "Not logged", ha="center", va="center",
-                    transform=ax.transAxes, color="#aaaaaa", fontsize=9)
+            ax.text(
+                0.5, 0.5, "Not logged", ha="center", va="center", transform=ax.transAxes, color="#aaaaaa", fontsize=9
+            )
         else:
             y = _smooth_s(series)
             ax.plot(epochs, y, color=color, linewidth=1.8)

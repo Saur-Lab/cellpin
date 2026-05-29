@@ -2,8 +2,8 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from scipy.sparse import issparse
 from pytorch_lightning.utilities import rank_zero_only
+from scipy.sparse import issparse
 
 
 def _iter_dataloader(dataloaders):
@@ -17,6 +17,8 @@ def _iter_dataloader(dataloaders):
 
 
 class CorrelationCallback(pl.Callback):
+    """Compute per-gene correlation metrics during validation."""
+
     def __init__(
         self,
         run_every_n_epochs: int = 5,
@@ -38,6 +40,7 @@ class CorrelationCallback(pl.Callback):
             self.no_panel_mask = None
 
     def on_validation_epoch_end(self, trainer, pl_module):
+        """Run correlation evaluation at the configured epoch interval."""
         if (trainer.current_epoch + 1) % self.run_every_n_epochs != 0:
             return
 
@@ -108,8 +111,7 @@ class CorrelationCallback(pl.Callback):
 
         mean_head_losses = np.mean(np.asarray(all_head_losses, dtype=np.float64), axis=0)
         per_head_metrics = {
-            f"reconstruction/head_{i + 1}_mse": float(v)
-            for i, v in enumerate(mean_head_losses.tolist())
+            f"reconstruction/head_{i + 1}_mse": float(v) for i, v in enumerate(mean_head_losses.tolist())
         }
 
         if trainer.logger is not None:
@@ -144,7 +146,7 @@ class CorrelationCallback(pl.Callback):
 
         if was_training:
             pl_module.train()
-        
+
     @rank_zero_only
     def _print(self, msg: str):
         print(msg)
@@ -168,4 +170,3 @@ class CorrelationCallback(pl.Callback):
                 correlations[gene_idx] = np.nan
 
         return correlations
-    

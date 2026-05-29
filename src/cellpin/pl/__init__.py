@@ -14,7 +14,7 @@ class PlotAccessor:
     Access via ``model.pl``.
     """
 
-    def __init__(self, model: "CellPin"):
+    def __init__(self, model: CellPin):
         self._model = model
 
     def losses(
@@ -52,8 +52,9 @@ class PlotAccessor:
         fig, axes
         """
         if log_path is None:
-            log_path = getattr(self._model, "_train_output_dir", None) or \
-                       getattr(self._model, "_pretrain_output_dir", None)
+            log_path = getattr(self._model, "_train_output_dir", None) or getattr(
+                self._model, "_pretrain_output_dir", None
+            )
             if log_path is None:
                 raise RuntimeError(
                     "No log directory found on the model.\n"

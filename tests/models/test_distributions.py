@@ -1,4 +1,3 @@
-import pytest
 import torch
 
 from cellpin.models.distributions import (
@@ -95,9 +94,7 @@ class TestZeroInflatedNegativeBinomial:
         mu = torch.rand(B, G).abs() + 0.1
         theta = torch.rand(B, G).abs() + 0.5
         zi_logits = torch.zeros(B, G)
-        lp = ZeroInflatedNegativeBinomial(mu=mu, theta=theta, zi_logits=zi_logits).log_prob(
-            torch.zeros(B, G)
-        )
+        lp = ZeroInflatedNegativeBinomial(mu=mu, theta=theta, zi_logits=zi_logits).log_prob(torch.zeros(B, G))
         assert lp.shape == (B, G)
 
     def test_high_zi_mean_near_zero(self):
@@ -136,9 +133,7 @@ class TestZeroInflatedNormal:
         mu = torch.randn(B, G)
         sigma2 = torch.rand(B, G).abs() + 0.1
         zi_logits = torch.zeros(B, G)
-        lp = ZeroInflatedNormal(mu=mu, sigma2=sigma2, zi_logits=zi_logits).log_prob(
-            torch.randn(B, G)
-        )
+        lp = ZeroInflatedNormal(mu=mu, sigma2=sigma2, zi_logits=zi_logits).log_prob(torch.randn(B, G))
         assert lp.shape == (B, G)
 
     def test_finite_log_prob(self):
@@ -146,9 +141,7 @@ class TestZeroInflatedNormal:
         sigma2 = torch.ones(B, G)
         zi_logits = torch.zeros(B, G)
         x = torch.randn(B, G)
-        assert torch.isfinite(
-            ZeroInflatedNormal(mu=mu, sigma2=sigma2, zi_logits=zi_logits).log_prob(x)
-        ).all()
+        assert torch.isfinite(ZeroInflatedNormal(mu=mu, sigma2=sigma2, zi_logits=zi_logits).log_prob(x)).all()
 
     def test_high_zi_mean_reduced(self):
         mu = torch.tensor([2.0])

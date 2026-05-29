@@ -2,7 +2,6 @@ import anndata as ad
 import numpy as np
 import pytest
 
-from cellpin.dataset import scAnnDataset, stAnnDataset
 from cellpin.pp import setup_data
 
 

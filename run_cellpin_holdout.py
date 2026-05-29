@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-run_cellpin_holdout.py
-======================
-Hold-out gene evaluation utilities for CellPin.
+"""Hold-out gene evaluation utilities for CellPin.
 
 Reserves a subset of spatial genes before training, then evaluates
 imputation quality on those held-out genes after training completes.
@@ -26,9 +23,11 @@ from cellpin.models import CellPin
 
 @dataclass
 class PreparedData:
+    """Prepared inputs and hold-out metadata for evaluation."""
+
     adata_sc: ad.AnnData
-    adata_st: ad.AnnData   # spatial with test_genes removed — training panel
-    adata_sp: ad.AnnData   # full spatial — hold-out evaluation ground truth
+    adata_st: ad.AnnData  # spatial with test_genes removed — training panel
+    adata_sp: ad.AnnData  # full spatial — hold-out evaluation ground truth
     test_genes: list[str] = field(default_factory=list)
 
 
@@ -55,11 +54,15 @@ def prepare_holdout_data(
     if n_genes and adata_sc.n_vars > n_genes:
         try:
             import scanpy as sc
+
             sc.pp.highly_variable_genes(
-                adata_sc, n_top_genes=n_genes, flavor="seurat_v3", layer=layer,
+                adata_sc,
+                n_top_genes=n_genes,
+                flavor="seurat_v3",
+                layer=layer,
             )
             adata_sc = adata_sc[:, adata_sc.var["highly_variable"]].copy()
-        except Exception as exc:
+        except (ImportError, KeyError, ValueError) as exc:
             warnings.warn(
                 f"HVG selection failed ({exc}); using all {adata_sc.n_vars} genes.",
                 stacklevel=2,
@@ -70,8 +73,7 @@ def prepare_holdout_data(
 
     if len(sp_genes_overlap) < n_holdout + 5:
         raise ValueError(
-            f"Only {len(sp_genes_overlap)} overlapping sc/spatial genes — "
-            f"insufficient for {n_holdout} hold-out genes."
+            f"Only {len(sp_genes_overlap)} overlapping sc/spatial genes — insufficient for {n_holdout} hold-out genes."
         )
 
     required = [g for g in (required_holdout or []) if g in set(sp_genes_overlap)]
@@ -129,23 +131,23 @@ def compute_metrics(
         s12 = float(np.cov(pred, true)[0, 1])
         dyn = max(abs(mu1), abs(mu2), 1.0)
         c1, c2 = (0.01 * dyn) ** 2, (0.03 * max(s1, s2)) ** 2
-        ssim_val = ((2 * mu1 * mu2 + c1) * (2 * s12 + c2)) / (
-            (mu1 ** 2 + mu2 ** 2 + c1) * (s1 ** 2 + s2 ** 2 + c2)
-        )
+        ssim_val = ((2 * mu1 * mu2 + c1) * (2 * s12 + c2)) / ((mu1**2 + mu2**2 + c1) * (s1**2 + s2**2 + c2))
         ssims.append(float(ssim_val) if np.isfinite(ssim_val) else 0.0)
 
-    per_gene = pd.DataFrame({
-        "gene":    gene_names,
-        "Pearson": pearsons,
-        "RMSE":    rmses,
-        "JS":      jss,
-        "SSIM":    ssims,
-    })
+    per_gene = pd.DataFrame(
+        {
+            "gene": gene_names,
+            "Pearson": pearsons,
+            "RMSE": rmses,
+            "JS": jss,
+            "SSIM": ssims,
+        }
+    )
     summary = {
         "Pearson_mean": float(np.mean(pearsons)),
-        "RMSE_mean":    float(np.mean(rmses)),
-        "JS_mean":      float(np.mean(jss)),
-        "SSIM_mean":    float(np.mean(ssims)),
+        "RMSE_mean": float(np.mean(rmses)),
+        "JS_mean": float(np.mean(jss)),
+        "SSIM_mean": float(np.mean(ssims)),
     }
     return summary, per_gene
 
@@ -184,16 +186,12 @@ def run_inference_and_evaluate(
     if not valid_test:
         raise ValueError("None of the hold-out test_genes appear in the imputed output.")
 
-    y_pred = np.asarray(adata_imputed.X, dtype=float)[
-        :, [imputed_gene_idx[g] for g in valid_test]
-    ]
+    y_pred = np.asarray(adata_imputed.X, dtype=float)[:, [imputed_gene_idx[g] for g in valid_test]]
 
     sp_gene_idx = {g: i for i, g in enumerate(prepared.adata_sp.var_names.tolist())}
     X_sp = prepared.adata_sp.X
     if hasattr(X_sp, "toarray"):
         X_sp = X_sp.toarray()
-    y_true = np.asarray(X_sp, dtype=float)[
-        :, [sp_gene_idx[g] for g in valid_test]
-    ]
+    y_true = np.asarray(X_sp, dtype=float)[:, [sp_gene_idx[g] for g in valid_test]]
 
     return compute_metrics(y_pred, y_true, valid_test)

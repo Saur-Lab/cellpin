@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 CellPin Model
 
@@ -24,7 +23,7 @@ Additional features
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 import anndata as ad
 import numpy as np
@@ -33,20 +32,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from rich.progress import track
-from torch.distributions import Normal, kl_divergence as kl
+from torch.distributions import Normal
+from torch.distributions import kl_divergence as kl
 
 from cellpin._sdata_utils import _resolve_sdata
 from cellpin.dataset import scAnnDataset
-from cellpin.models.vae import CellPinVAE
 from cellpin.models.utils import (
     build_data_loaders,
     load_config_and_checkpoint,
     save_checkpoint,
 )
+from cellpin.models.vae import CellPinVAE
 from cellpin.pl import PlotAccessor
 from cellpin.tl import TLAccessor
 from cellpin.training import CellPinTrainer
-
 
 
 def soft_nn_loss(
@@ -89,7 +88,7 @@ class CellPin(pl.LightningModule):
     def __init__(
         self,
         sc_dataset: scAnnDataset,
-        config: Dict[str, Any] | str | Path | None = None,
+        config: dict[str, Any] | str | Path | None = None,
         checkpoint: str | Path | None = None,
     ):
         super().__init__()
@@ -106,31 +105,29 @@ class CellPin(pl.LightningModule):
         # Panel gene names in the order the panel encoder expects them:
         # boolean mask applied to full_expr → ascending sc_adata position order.
         self.panel_gene_names: list[str] = [
-            self.gene_names[i]
-            for i, m in enumerate(sc_dataset._panel_mask.tolist())
-            if m
+            self.gene_names[i] for i, m in enumerate(sc_dataset._panel_mask.tolist()) if m
         ]
-        params["_gene_names"]       = self.gene_names
+        params["_gene_names"] = self.gene_names
         params["_panel_gene_names"] = self.panel_gene_names
-        params["_n_input_full"]     = self.num_genes
-        params["_n_input_panel"]    = self.n_panel_genes
+        params["_n_input_full"] = self.num_genes
+        params["_n_input_panel"] = self.n_panel_genes
 
         self.save_hyperparameters(params)
 
         # Loss weights
         # Pretrain stage
-        self.loss_weights_pretrain: Dict[str, float] = {
+        self.loss_weights_pretrain: dict[str, float] = {
             "kl_weight": float(getattr(self, "kl_weight_pretrain", 1.0)),
-            "recon":     float(getattr(self, "lambda_recon_pretrain", 1.0)),
-            "inv":       0.0,
+            "recon": float(getattr(self, "lambda_recon_pretrain", 1.0)),
+            "inv": 0.0,
         }
         # Main training stage
-        self.loss_weights_train: Dict[str, float] = {
+        self.loss_weights_train: dict[str, float] = {
             "kl_weight": float(getattr(self, "kl_weight", 1.0)),
-            "recon":     float(getattr(self, "lambda_recon", 1.0)),
-            "inv":       float(getattr(self, "lambda_inv", 1.0)),
-            "snn":       float(getattr(self, "lambda_snn", 0.1)),
-            "distill":   float(getattr(self, "lambda_distill", 1.0)),
+            "recon": float(getattr(self, "lambda_recon", 1.0)),
+            "inv": float(getattr(self, "lambda_inv", 1.0)),
+            "snn": float(getattr(self, "lambda_snn", 0.1)),
+            "distill": float(getattr(self, "lambda_distill", 1.0)),
         }
 
         self.kl_warmup_epochs = int(getattr(self, "kl_warmup_epochs", 0))
@@ -180,9 +177,7 @@ class CellPin(pl.LightningModule):
         self._training_stage: Literal["pretrain", "main"] = "main"
         self._pretrain_completed: bool = False
         self._freeze_pretrained_in_main: bool = True
-        self._decoder_warm_unfreeze_epoch: int = int(
-            getattr(self, "decoder_warm_unfreeze_epoch", -1)
-        )
+        self._decoder_warm_unfreeze_epoch: int = int(getattr(self, "decoder_warm_unfreeze_epoch", -1))
         self._decoder_unfrozen: bool = True
 
         # Log directories set after training — used by model.pl.losses()
@@ -192,8 +187,6 @@ class CellPin(pl.LightningModule):
         self.pl = PlotAccessor(self)
         self.tl = TLAccessor(self)
 
-
-
     def save(self, path: str | Path) -> None:
         """Serialise model weights and hyper-parameters to a ``.pt`` file.
 
@@ -202,20 +195,17 @@ class CellPin(pl.LightningModule):
         """
         save_checkpoint(Path(path), self.state_dict(), dict(self.hparams))
 
-
-
-    def _get_loss_weights(self, stage: str) -> Dict[str, float]:
+    def _get_loss_weights(self, stage: str) -> dict[str, float]:
         """Return loss weights for the given training stage.
 
         Args:
             stage: ``'pretrain'`` or ``'main'``.
 
-        Returns:
+        Returns
+        -------
             Dict with keys ``'kl_weight'``, ``'recon'``, ``'inv'``.
         """
-        return (
-            self.loss_weights_pretrain if stage == "pretrain" else self.loss_weights_train
-        )
+        return self.loss_weights_pretrain if stage == "pretrain" else self.loss_weights_train
 
     def set_stage_loss_weights(self, stage: str, **weights: float) -> None:
         """Programmatically update loss weights for a stage.
@@ -226,16 +216,15 @@ class CellPin(pl.LightningModule):
             stage: ``'pretrain'`` or ``'main'``.
             **weights: Key-value overrides, e.g. ``inv=2.0``, ``recon=1.5``.
 
-        Raises:
+        Raises
+        ------
             KeyError: For unknown weight keys.
 
         Example::
 
             model.set_stage_loss_weights("main", inv=2.0, recon=1.5)
         """
-        target = (
-            self.loss_weights_pretrain if stage == "pretrain" else self.loss_weights_train
-        )
+        target = self.loss_weights_pretrain if stage == "pretrain" else self.loss_weights_train
         for k, v in weights.items():
             if k not in target:
                 raise KeyError(f"Unknown weight '{k}'. Valid keys: {list(target.keys())}")
@@ -257,12 +246,12 @@ class CellPin(pl.LightningModule):
         """
         pretrain_mode = stage == "pretrain"
 
-        full_trainable     = pretrain_mode or not freeze_pretrained
-        decoder_trainable  = pretrain_mode or not freeze_pretrained
+        full_trainable = pretrain_mode or not freeze_pretrained
+        decoder_trainable = pretrain_mode or not freeze_pretrained
         if decoder_trainable_override is not None:
             decoder_trainable = decoder_trainable_override
-        panel_trainable    = not pretrain_mode
-        library_trainable  = True
+        panel_trainable = not pretrain_mode
+        library_trainable = True
 
         for p in self.vae.z_encoder_full.parameters():
             p.requires_grad = full_trainable
@@ -274,6 +263,7 @@ class CellPin(pl.LightningModule):
             p.requires_grad = decoder_trainable
 
     def on_train_epoch_start(self) -> None:
+        """Warm-unfreeze decoder parameters when scheduled."""
         if self._training_stage not in ("main",):
             return
         if self._decoder_warm_unfreeze_epoch < 0 or self._decoder_unfrozen:
@@ -292,7 +282,8 @@ class CellPin(pl.LightningModule):
     def _kl_annealing_weight(self) -> float:
         """Compute the current KL annealing multiplier (linear warm-up).
 
-        Returns:
+        Returns
+        -------
             Float in ``[0.0, 1.0]``.
         """
         if self.kl_warmup_epochs <= 0:
@@ -322,7 +313,7 @@ class CellPin(pl.LightningModule):
 
         B = x_panel.size(0)
         alpha = torch.rand(B, 1, device=x_panel.device) * max_alpha
-        perm  = torch.randperm(B, device=x_panel.device)
+        perm = torch.randperm(B, device=x_panel.device)
         return (1.0 - alpha) * x_panel + alpha * x_panel[perm]
 
     def _poisson_resample_panel(self, x_panel: torch.Tensor) -> torch.Tensor:
@@ -358,14 +349,15 @@ class CellPin(pl.LightningModule):
             px_rate: Predicted NB rate ``(batch, n_genes)``.
             x_full:  Observed counts ``(batch, n_genes)``.
 
-        Returns:
-            Scalar loss tensor. 
+        Returns
+        -------
+            Scalar loss tensor.
         """
         p = px_rate - px_rate.mean(dim=0, keepdim=True)
-        t = x_full  - x_full.mean(dim=0,  keepdim=True)
-        num   = (p * t).sum(dim=0)                          # (G,)
-        denom = p.norm(dim=0) * t.norm(dim=0) + 1e-8       # (G,)
-        r = num / denom                                     # (G,) in [-1, 1]
+        t = x_full - x_full.mean(dim=0, keepdim=True)
+        num = (p * t).sum(dim=0)  # (G,)
+        denom = p.norm(dim=0) * t.norm(dim=0) + 1e-8  # (G,)
+        r = num / denom  # (G,) in [-1, 1]
         return 1.0 - r.mean()
 
     def _mask_recon_to_no_panel(
@@ -386,8 +378,8 @@ class CellPin(pl.LightningModule):
         * ``'gene'``      — ``(n_genes,)``      → ``(n_no_panel,)``
         * ``'gene-cell'`` — ``(batch, n_genes)`` → ``(batch, n_no_panel)``
         """
-        mask = ~self.vae.panel_mask          # (n_genes,) bool, True = non-panel
-        x_m    = x[:, mask]
+        mask = ~self.vae.panel_mask  # (n_genes,) bool, True = non-panel
+        x_m = x[:, mask]
         rate_m = px_rate[:, mask]
         if self.vae.dispersion == "gene-cell":
             r_m = px_r[:, mask]
@@ -396,11 +388,8 @@ class CellPin(pl.LightningModule):
         drop_m = px_dropout[:, mask] if px_dropout is not None else px_dropout
         return x_m, rate_m, r_m, drop_m
 
-
     # Loss computation
-    def compute_pretrain_losses(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def compute_pretrain_losses(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Pretraining losses (full-gene view only).
 
         Objective: ELBO on full-gene path.
@@ -409,19 +398,16 @@ class CellPin(pl.LightningModule):
             batch: Must contain ``'full_expr'`` and ``'panel_expr'``.
                 Optionally ``'local_l_mean'``, ``'local_l_var'``, ``'batch_index'``.
 
-        Returns:
+        Returns
+        -------
             Dict with scalar tensors: ``'loss'``, ``'reconst_loss'``,
             ``'kl_loss'``, ``'kl_l_loss'``.
         """
-        x_full       = batch["full_expr"]
-        x_panel      = batch["panel_expr"]
-        local_l_mean = batch.get(
-            "local_l_mean", torch.zeros(x_full.size(0), 1, device=x_full.device)
-        )
-        local_l_var  = batch.get(
-            "local_l_var", torch.ones(x_full.size(0), 1, device=x_full.device)
-        )
-        batch_index  = batch.get("batch_index", None)
+        x_full = batch["full_expr"]
+        x_panel = batch["panel_expr"]
+        local_l_mean = batch.get("local_l_mean", torch.zeros(x_full.size(0), 1, device=x_full.device))
+        local_l_var = batch.get("local_l_var", torch.ones(x_full.size(0), 1, device=x_full.device))
+        batch_index = batch.get("batch_index", None)
 
         # Augment x_panel before it reaches l_encoder (same augmentations as
         # stage 2 — Poisson resampling for capture-efficiency robustness, then
@@ -465,26 +451,24 @@ class CellPin(pl.LightningModule):
         else:
             pearson_loss = torch.tensor(0.0, device=x_full.device)
 
-        w    = self._get_loss_weights("pretrain")
+        w = self._get_loss_weights("pretrain")
         kl_w = self._kl_annealing_weight() * w["kl_weight"]
         total = (
-            w["recon"]       * reconst_loss
-            + kl_w           * kl_loss
-            + kl_l.mean()                       # library KL always weight-1
+            w["recon"] * reconst_loss
+            + kl_w * kl_loss
+            + kl_l.mean()  # library KL always weight-1
             + lambda_pearson * pearson_loss
         )
 
         return {
-            "loss":          total,
-            "reconst_loss":  reconst_loss,
-            "kl_loss":       kl_loss,
-            "kl_l_loss":     kl_l.mean(),
-            "pearson_loss":  pearson_loss,
+            "loss": total,
+            "reconst_loss": reconst_loss,
+            "kl_loss": kl_loss,
+            "kl_l_loss": kl_l.mean(),
+            "pearson_loss": pearson_loss,
         }
 
-    def compute_losses(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
+    def compute_losses(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Main training losses
 
         Objective:
@@ -500,21 +484,18 @@ class CellPin(pl.LightningModule):
             batch: Must contain ``'full_expr'`` and ``'panel_expr'``.
                 Optionally ``'local_l_mean'``, ``'local_l_var'``, ``'batch_index'``.
 
-        Returns:
+        Returns
+        -------
             Dict with scalar tensors: ``'loss'``, ``'reconst_loss'``,
             ``'kl_loss'``, ``'kl_l_loss'``, ``'distill_loss'``,
             ``'snn_loss'``, ``'inv_loss'``, ``'snn_temperature'``,
             ``'pearson_loss'``.
         """
-        x_full       = batch["full_expr"]
-        x_panel      = batch["panel_expr"]
-        local_l_mean = batch.get(
-            "local_l_mean", torch.zeros(x_full.size(0), 1, device=x_full.device)
-        )
-        local_l_var  = batch.get(
-            "local_l_var", torch.ones(x_full.size(0), 1, device=x_full.device)
-        )
-        batch_index  = batch.get("batch_index", None)
+        x_full = batch["full_expr"]
+        x_panel = batch["panel_expr"]
+        local_l_mean = batch.get("local_l_mean", torch.zeros(x_full.size(0), 1, device=x_full.device))
+        local_l_var = batch.get("local_l_var", torch.ones(x_full.size(0), 1, device=x_full.device))
+        batch_index = batch.get("batch_index", None)
 
         # Pass 1: full encoder — no grad, used only as reference
         with torch.no_grad():
@@ -540,8 +521,7 @@ class CellPin(pl.LightningModule):
         panel_qz_v_elbo = out_panel["qz_v"].clamp(min=1e-4, max=1e4)
         kl_z = kl(
             Normal(out_panel["qz_m"], panel_qz_v_elbo.sqrt()),
-            Normal(torch.zeros_like(out_panel["qz_m"]),
-                   torch.ones_like(panel_qz_v_elbo)),
+            Normal(torch.zeros_like(out_panel["qz_m"]), torch.ones_like(panel_qz_v_elbo)),
         ).sum(dim=1)
 
         kl_l = kl(
@@ -550,9 +530,7 @@ class CellPin(pl.LightningModule):
         ).sum(dim=1)
 
         if self._reconstruct_panel or self.vae.panel_mask is None:
-            x_r, rate_r, r_r, drop_r = (
-                x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"]
-            )
+            x_r, rate_r, r_r, drop_r = (x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"])
         else:
             x_r, rate_r, r_r, drop_r = self._mask_recon_to_no_panel(
                 x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"]
@@ -579,11 +557,15 @@ class CellPin(pl.LightningModule):
             distill_loss = F.mse_loss(out_panel["qz_m"], out_full["qz_m"].detach())
         else:  # "kl"
             panel_qz_v = out_panel["qz_v"].clamp(min=1e-4, max=1e4)
-            full_qz_v  = out_full["qz_v"].clamp(min=1e-4, max=1e4)
-            distill_loss = kl(
-                Normal(out_panel["qz_m"], panel_qz_v.sqrt()),
-                Normal(out_full["qz_m"].detach(), full_qz_v.sqrt().detach()),
-            ).sum(dim=1).mean()
+            full_qz_v = out_full["qz_v"].clamp(min=1e-4, max=1e4)
+            distill_loss = (
+                kl(
+                    Normal(out_panel["qz_m"], panel_qz_v.sqrt()),
+                    Normal(out_full["qz_m"].detach(), full_qz_v.sqrt().detach()),
+                )
+                .sum(dim=1)
+                .mean()
+            )
 
         # Learnable temperature: stored as log(T), clamped to [0.01, 1.0]
         snn_temp = self.snn_temperature.exp().clamp(0.01, 1.0)
@@ -593,42 +575,40 @@ class CellPin(pl.LightningModule):
 
         kl_w = self._kl_annealing_weight() * w["kl_weight"]
         total = (
-            w["recon"]       * reconst_loss
-            + kl_w           * kl_loss
-            + kl_l.mean()                       # library KL always weight-1
-            + w["inv"]       * inv_loss
+            w["recon"] * reconst_loss
+            + kl_w * kl_loss
+            + kl_l.mean()  # library KL always weight-1
+            + w["inv"] * inv_loss
             + lambda_pearson * pearson_loss
         )
 
         return {
-            "loss":            total,
-            "reconst_loss":    reconst_loss,
-            "kl_loss":         kl_loss,
-            "kl_l_loss":       kl_l.mean(),
-            "distill_loss":    distill_loss,
-            "snn_loss":        snn,
-            "inv_loss":        inv_loss,
+            "loss": total,
+            "reconst_loss": reconst_loss,
+            "kl_loss": kl_loss,
+            "kl_l_loss": kl_l.mean(),
+            "distill_loss": distill_loss,
+            "snn_loss": snn,
+            "inv_loss": inv_loss,
             "snn_temperature": snn_temp,
-            "pearson_loss":    pearson_loss,
+            "pearson_loss": pearson_loss,
         }
 
     # ------------------------------------------------------------------
     # Lightning hooks
     # ------------------------------------------------------------------
 
-    def training_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
+    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        """Run a training step for the current stage."""
         return self._shared_step(batch, batch_idx, prefix="train")
 
-    def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        """Run a validation step for the current stage."""
         return self._shared_step(batch, batch_idx, prefix="val")
 
     def _shared_step(
         self,
-        batch: Dict[str, torch.Tensor],
+        batch: dict[str, torch.Tensor],
         batch_idx: int,
         prefix: str,
     ) -> torch.Tensor:
@@ -637,9 +617,9 @@ class CellPin(pl.LightningModule):
         else:
             losses = self.compute_losses(batch)
 
-        log_kw: Dict[str, Any] = {
+        log_kw: dict[str, Any] = {
             "prog_bar": True,
-            "on_step":  False,
+            "on_step": False,
             "on_epoch": True,
         }
         if prefix == "val":
@@ -651,15 +631,12 @@ class CellPin(pl.LightningModule):
 
         return losses["loss"]
 
-
     # Optimiser
 
     def configure_optimizers(self):
         """AdamW optimiser with cosine-annealing LR schedule."""
         include_all_for_warm_unfreeze = (
-            self._training_stage == "main"
-            and self._decoder_warm_unfreeze_epoch >= 0
-            and not self._decoder_unfrozen
+            self._training_stage == "main" and self._decoder_warm_unfreeze_epoch >= 0 and not self._decoder_unfrozen
         )
         if include_all_for_warm_unfreeze:
             params = list(self.parameters())
@@ -679,9 +656,9 @@ class CellPin(pl.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval":  "epoch",
+                "interval": "epoch",
                 "frequency": 1,
-                "monitor":   "val_loss",
+                "monitor": "val_loss",
             },
         }
 
@@ -707,7 +684,8 @@ class CellPin(pl.LightningModule):
                 ``trainer_kwargs['max_epochs']`` if present).
             **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
 
-        Returns:
+        Returns
+        -------
             Fitted :class:`~cellpin.training.CellPinTrainer`.
         """
         self._training_stage = "pretrain"
@@ -765,10 +743,12 @@ class CellPin(pl.LightningModule):
                 decoder.
             **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
 
-        Returns:
+        Returns
+        -------
             Fitted :class:`~cellpin.training.CellPinTrainer`.
 
-        Raises:
+        Raises
+        ------
             RuntimeError: If ``require_pretrained=True``, ``freeze_pretrained=True``,
                 and pretraining has not been completed.
         """
@@ -824,7 +804,7 @@ class CellPin(pl.LightningModule):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _panel_from_batch(batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _panel_from_batch(batch: dict[str, torch.Tensor]) -> torch.Tensor:
         if "panel_expr" in batch:
             return batch["panel_expr"]
         if "full_expr" in batch:
@@ -845,7 +825,8 @@ class CellPin(pl.LightningModule):
                 :class:`~cellpin.dataset.stAnnDataset`.
             use_mean: Return the posterior mean rather than a sample.
 
-        Returns:
+        Returns
+        -------
             Float32 array ``(n_cells, n_latent)``.
         """
         self.eval()
@@ -868,6 +849,7 @@ class CellPin(pl.LightningModule):
         mc_samples: int = 50,
         mask_fraction: float = 0.2,
     ):
+        """Embed cells and generate imputed expression values."""
         self.eval()  # required: DecoderSCVI uses BatchNorm1d (must use running stats)
         if torch.cuda.is_available() and self.device.type == "cpu":
             self.cuda()
@@ -882,16 +864,13 @@ class CellPin(pl.LightningModule):
         panel_perm: torch.Tensor | None = None
         dataset = dataloader.dataset
         if hasattr(dataset, "panel_genes") and hasattr(self, "panel_gene_names"):
-            ds_panel    = list(dataset.panel_genes)
+            ds_panel = list(dataset.panel_genes)
             model_panel = self.panel_gene_names
             if ds_panel != model_panel:
                 ds_idx = {g: i for i, g in enumerate(ds_panel)}
                 missing = [g for g in model_panel if g not in ds_idx]
                 if missing:
-                    raise ValueError(
-                        f"Dataset is missing {len(missing)} genes the model expects: "
-                        f"{missing[:10]} ..."
-                    )
+                    raise ValueError(f"Dataset is missing {len(missing)} genes the model expects: {missing[:10]} ...")
                 perm = [ds_idx[g] for g in model_panel]
                 panel_perm = torch.tensor(perm, dtype=torch.long)
                 print(
@@ -927,9 +906,7 @@ class CellPin(pl.LightningModule):
                     x_in = x_panel
 
                     if mask_fraction > 0.0:
-                        keep = torch.bernoulli(
-                            torch.full_like(x_in, 1.0 - mask_fraction)
-                        )
+                        keep = torch.bernoulli(torch.full_like(x_in, 1.0 - mask_fraction))
                         x_in = x_in * keep
 
                     x_in_ = torch.log1p(x_in) if self.vae.log_variational else x_in
@@ -939,9 +916,7 @@ class CellPin(pl.LightningModule):
                     if self.vae.reconstruction_loss in {"normal", "zin"}:
                         px_rate_s, _, _ = self.vae.decoder(z_s, batch_index)
                     else:
-                        _, _, px_rate_s, _ = self.vae.decoder(
-                            self.vae.dispersion, z_s, ql_m, batch_index
-                        )
+                        _, _, px_rate_s, _ = self.vae.decoder(self.vae.dispersion, z_s, ql_m, batch_index)
 
                     samples.append(px_rate_s)
 
@@ -954,9 +929,7 @@ class CellPin(pl.LightningModule):
                 if self.vae.reconstruction_loss in {"normal", "zin"}:
                     px_rate, _, _ = self.vae.decoder(qz_m, batch_index)
                 else:
-                    _, _, px_rate, _ = self.vae.decoder(
-                        self.vae.dispersion, qz_m, library_use, batch_index
-                    )
+                    _, _, px_rate, _ = self.vae.decoder(self.vae.dispersion, qz_m, library_use, batch_index)
 
             # keep observed panel genes if needed
             if not self._reconstruct_panel and self.vae.panel_idx is not None:
@@ -989,10 +962,7 @@ class CellPin(pl.LightningModule):
 
         if obs_adata is not None:
             if obs_adata.n_obs != adata_out.n_obs:
-                raise ValueError(
-                    f"obs_adata has {obs_adata.n_obs} cells; "
-                    f"imputation has {adata_out.n_obs}."
-                )
+                raise ValueError(f"obs_adata has {obs_adata.n_obs} cells; imputation has {adata_out.n_obs}.")
             adata_out.obs = obs_adata.obs.copy()
 
             for key, val in obs_adata.obsm.items():
@@ -1009,9 +979,7 @@ class CellPin(pl.LightningModule):
                         f"  [impute] Filling {adata_out.n_vars - len(src_cols)} "
                         "gene(s) absent from obs_adata layers with sentinel -2.0"
                     )
-                    mat = np.full(
-                        (adata_out.n_obs, adata_out.n_vars), -2.0, dtype=np.float32
-                    )
+                    mat = np.full((adata_out.n_obs, adata_out.n_vars), -2.0, dtype=np.float32)
                     mat[:, src_cols] = np.asarray(lyr_val, dtype=np.float32)[:, src_mask]
                     adata_out.layers[lyr_key] = mat
 
@@ -1046,13 +1014,15 @@ class CellPin(pl.LightningModule):
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
-        Returns:
+        Returns
+        -------
             :class:`anndata.AnnData` with ``X`` = imputed counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']``.
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
-        Raises:
+        Raises
+        ------
             ValueError: If ``obs_adata`` has the wrong number of cells.
         """
         obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
@@ -1069,7 +1039,6 @@ class CellPin(pl.LightningModule):
             sdata.tables[table_key] = adata_out
             return sdata
         return adata_out
-
 
     def fit(
         self,
@@ -1115,7 +1084,7 @@ class CellPin(pl.LightningModule):
 
         Example::
 
-            sc_dataset, _ = cellpin.pp.setup(sc_adata, st_adata)
+            sc_dataset, _ = cellpin.pp.setup_data(sc_adata, st_adata)
             model = cellpin.CellPin(sc_dataset)
             model.fit(sc_dataset)
         """
@@ -1190,14 +1159,16 @@ class CellPin(pl.LightningModule):
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
-        Returns:
+        Returns
+        -------
             :class:`anndata.AnnData` with ``X`` = imputed (float or int) counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']`` = copy of
             ``X``, and optionally ``layers['imputed_norm']``.
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
-        Raises:
+        Raises
+        ------
             ValueError: If ``obs_adata`` has the wrong number of cells, or if
                 ``area_key`` is specified but not found in ``adata.obs``, or if
                 any cell area is ≤ 0.
@@ -1226,9 +1197,7 @@ class CellPin(pl.LightningModule):
             # log1p(norm(E[X])) > E[log1p(norm(X))].  We correct this by
             # drawing K samples from NB, normalising and log1p-ing each draw,
             # then averaging — so norm+log1p go *inside* the MC loop.
-            px_r_np = np.exp(
-                self.vae.px_r.detach().cpu().numpy()
-            ).astype(np.float64)  # (n_genes,)
+            px_r_np = np.exp(self.vae.px_r.detach().cpu().numpy()).astype(np.float64)  # (n_genes,)
             mu = counts.astype(np.float64)
             # NB success-probability: p = theta / (theta + mu)
             p = px_r_np / (px_r_np + np.clip(mu, 1e-8, None))
@@ -1240,9 +1209,7 @@ class CellPin(pl.LightningModule):
 
             if resolved_area_key is not None:
                 if resolved_area_key not in adata_out.obs.columns:
-                    raise ValueError(
-                        f"area_key='{resolved_area_key}' not found in adata.obs"
-                    )
+                    raise ValueError(f"area_key='{resolved_area_key}' not found in adata.obs")
                 cell_area = adata_out.obs[resolved_area_key].values.astype(np.float64)
                 if np.any(cell_area <= 0):
                     raise ValueError("All cell areas must be positive.")
@@ -1267,4 +1234,3 @@ class CellPin(pl.LightningModule):
             sdata.tables[table_key] = adata_out
             return sdata
         return adata_out
-

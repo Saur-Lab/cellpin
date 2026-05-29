@@ -16,7 +16,7 @@ class TLAccessor:
     Access via ``model.tl``.
     """
 
-    def __init__(self, model: "CellPin"):
+    def __init__(self, model: CellPin):
         self._model = model
 
     def label_transfer(
@@ -44,7 +44,8 @@ class TLAccessor:
             test_size: Fraction of scRNA cells held out for evaluation (default 0.2).
             random_state: Random seed for the train/test split (default 42).
 
-        Returns:
+        Returns
+        -------
             ``(test_accuracy, sp_adata)``. ``sp_adata`` is modified in-place and gains
             ``.obs["cellpin_annotation"]`` and ``.obs["cellpin_annotation_certainty"]``.
         """

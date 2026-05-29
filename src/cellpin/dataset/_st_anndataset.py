@@ -1,13 +1,15 @@
 from __future__ import annotations
-from typing import Optional
+
 import anndata as ad
 import numpy as np
 import torch
 from scipy.sparse import issparse
 from torch.utils.data import Dataset
 
+
 class stAnnDataset(Dataset):
-    """
+    """Spatial AnnData dataset aligned to a panel gene list.
+
     Spatial dataset that returns expression aligned to an explicit ordered panel
     gene list.
 
@@ -23,8 +25,8 @@ class stAnnDataset(Dataset):
         self,
         adata: ad.AnnData,
         panel_genes: list[str],
-        layer: Optional[str] = None,
-        gene_symbols: Optional[str] = None,
+        layer: str | None = None,
+        gene_symbols: str | None = None,
     ) -> None:
         self.adata = adata
         self.layer = layer
@@ -43,8 +45,7 @@ class stAnnDataset(Dataset):
         missing = [g for g in panel_genes if g not in st_map]
         if missing:
             raise ValueError(
-                f"stAnnDataset got panel_genes not present in spatial data "
-                f"(n={len(missing)}). Examples: {missing[:10]}"
+                f"stAnnDataset got panel_genes not present in spatial data (n={len(missing)}). Examples: {missing[:10]}"
             )
 
         col_idx = np.array([st_map[g] for g in panel_genes], dtype=np.int64)
@@ -53,19 +54,14 @@ class stAnnDataset(Dataset):
         self.X = self.adata.layers[self.layer] if self.layer is not None else self.adata.X
         self.is_sparse = issparse(self.X)
 
-
         if self.is_sparse:
             lib_sizes = np.array(self.X.sum(axis=1)).ravel()
         else:
             lib_sizes = np.array(self.X).sum(axis=1)
 
         log_lib_sizes = np.log1p(lib_sizes.astype(np.float64))
-        self._local_l_mean = torch.tensor(
-            [float(log_lib_sizes.mean())], dtype=torch.float32
-        )
-        self._local_l_var = torch.tensor(
-            [float(log_lib_sizes.var() + 1e-6)], dtype=torch.float32
-        )
+        self._local_l_mean = torch.tensor([float(log_lib_sizes.mean())], dtype=torch.float32)
+        self._local_l_var = torch.tensor([float(log_lib_sizes.var() + 1e-6)], dtype=torch.float32)
 
     def __len__(self) -> int:
         return self.adata.n_obs
@@ -79,8 +75,8 @@ class stAnnDataset(Dataset):
         expr = torch.tensor(expr, dtype=torch.float32)
 
         return {
-            "full_expr":    expr,
-            "panel_expr":   expr,           # spatial only has panel genes
+            "full_expr": expr,
+            "panel_expr": expr,  # spatial only has panel genes
             "local_l_mean": self._local_l_mean,
-            "local_l_var":  self._local_l_var,
+            "local_l_var": self._local_l_var,
         }

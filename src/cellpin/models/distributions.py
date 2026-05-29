@@ -1,16 +1,12 @@
-# -*- coding: utf-8 -*-
-"""
-Probability distributions used in CellPin VAE models.
-
-"""
+"""Probability distributions used in CellPin VAE models."""
 
 from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import Distribution, Normal as _TorchNormal
+from torch.distributions import Distribution, constraints
+from torch.distributions import Normal as _TorchNormal
 from torch.distributions import Poisson as _TorchPoisson
-from torch.distributions import constraints
 from torch.distributions.utils import (
     broadcast_all,
     lazy_property,
@@ -31,7 +27,8 @@ def log_nb_positive(
         theta: Inverse dispersion (theta -> inf gives Poisson).
         eps: Small constant for numerical stability.
 
-    Returns:
+    Returns
+    -------
         Log-probability per element.
     """
     log_theta_mu_eps = torch.log(theta + mu + eps)
@@ -62,7 +59,8 @@ def log_zinb_positive(
         zi_logits: Logits for the zero-inflation Bernoulli.
         eps: Small constant for numerical stability.
 
-    Returns:
+    Returns
+    -------
         Log-probability per element.
     """
     softplus_pi = F.softplus(-zi_logits)
@@ -115,14 +113,17 @@ class NegativeBinomial(Distribution):
         super().__init__(validate_args=validate_args)
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        """Return elementwise log-probability for observed counts."""
         return log_nb_positive(value, mu=self.mu, theta=self.theta)
 
     @property
     def mean(self) -> torch.Tensor:
+        """Return the mean of the distribution."""
         return self.mu
 
     @lazy_property
     def variance(self) -> torch.Tensor:
+        """Return the variance of the distribution."""
         return self.mu + self.mu.pow(2) / self.theta
 
 
@@ -153,12 +154,12 @@ class ZeroInflatedNegativeBinomial(NegativeBinomial):
         self.zi_logits = zi_logits
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
-        return log_zinb_positive(
-            value, mu=self.mu, theta=self.theta, zi_logits=self.zi_logits
-        )
+        """Return elementwise log-probability for observed counts."""
+        return log_zinb_positive(value, mu=self.mu, theta=self.theta, zi_logits=self.zi_logits)
 
     @lazy_property
     def mean(self) -> torch.Tensor:
+        """Return the mean of the distribution."""
         pi = torch.sigmoid(self.zi_logits)
         return (1 - pi) * self.mu
 
@@ -184,15 +185,16 @@ def log_zin(
         zi_logits: Zero-inflation logits (log π/(1−π)).
         eps: Numerical stability floor for σ.
 
-    Returns:
+    Returns
+    -------
         Log-probability per element, same shape as ``x``.
     """
     sigma = (sigma2 + eps).sqrt()
     log_prob_normal = _TorchNormal(mu, sigma).log_prob(x)
     log_prob_normal_at_zero = _TorchNormal(mu, sigma).log_prob(torch.zeros_like(x))
 
-    log_pi = -F.softplus(-zi_logits)     # log σ(zi_logits)
-    log_1mpi = -F.softplus(zi_logits)    # log(1 − σ(zi_logits))
+    log_pi = -F.softplus(-zi_logits)  # log σ(zi_logits)
+    log_1mpi = -F.softplus(zi_logits)  # log(1 − σ(zi_logits))
 
     case_zero = torch.logaddexp(log_pi, log_1mpi + log_prob_normal_at_zero)
     case_nonzero = log_1mpi + log_prob_normal
@@ -232,10 +234,12 @@ class ZeroInflatedNormal(Distribution):
         super().__init__(validate_args=validate_args)
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        """Return elementwise log-probability for observed values."""
         return log_zin(value, mu=self.mu, sigma2=self.sigma2, zi_logits=self.zi_logits)
 
     @lazy_property
     def mean(self) -> torch.Tensor:
+        """Return the mean of the distribution."""
         pi = torch.sigmoid(self.zi_logits)
         return (1.0 - pi) * self.mu
 
@@ -259,8 +263,10 @@ class Poisson(Distribution):
         super().__init__(validate_args=validate_args)
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
+        """Return elementwise log-probability for observed counts."""
         return self._poisson.log_prob(value)
 
     @property
     def mean(self) -> torch.Tensor:
+        """Return the mean of the distribution."""
         return self.rate
