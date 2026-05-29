@@ -47,7 +47,7 @@ optional-dependencies.spatial = [
 # https://docs.pypi.org/project_metadata/#project-urls
 urls.Documentation = "https://cellpin.readthedocs.io/"
 urls.Homepage = "https://github.com/Saur-Lab/cellpin"
-urls.Source = "ttps://github.com/Saur-Lab/cellpin/cellpin"
+urls.Source = "https://github.com/Saur-Lab/cellpin"
 
 [dependency-groups]
 dev = [
@@ -65,6 +65,7 @@ doc = [
   "myst-nb>=1.1",
   "pandas",
   "sphinx>=8.1",
+  "sphinx-autobuild",
   "sphinx-autodoc-typehints",
   "sphinx-book-theme>=1",
   "sphinx-copybutton",
@@ -79,6 +80,7 @@ envs.default.installer = "uv"
 envs.default.dependency-groups = [ "dev" ]
 envs.docs.dependency-groups = [ "doc" ]
 envs.docs.scripts.build = "sphinx-build -M html docs docs/_build -W {args}"
+envs.docs.scripts.serve = "sphinx-autobuild docs docs/_build/html {args}"
 envs.docs.scripts.open = "python -m webbrowser -t docs/_build/html/index.html"
 envs.docs.scripts.clean = "git clean -fdX -- {args:docs}"
 envs.hatch-test.dependency-groups = [ "dev", "test" ]

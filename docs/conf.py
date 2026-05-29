@@ -118,6 +118,7 @@ html_static_path = ["_static"]
 html_css_files = ["css/custom.css"]
 
 html_title = project
+html_logo = "_static/logo.png"
 
 html_theme_options = {
     "repository_url": repository_url,
@@ -134,3 +135,14 @@ nitpick_ignore = [
     # you can add an exception to this list.
     #     ("py:class", "igraph.Graph"),
 ]
+
+
+
+
+
+
+autodoc_default_options = {
+    'members': True,
+    'inherited-members': False,
+    'show-inheritance': True,
+}

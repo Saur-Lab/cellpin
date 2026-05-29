@@ -9,8 +9,9 @@
 .. autosummary::
     :toctree: generated
 
-    pp.basic_preproc
-    pp.elaborate_example
+    pp.setup_data
+    pp.load_sc_example
+    pp.load_sp_example
 ```
 
 ## Tools
@@ -22,7 +23,7 @@
 .. autosummary::
     :toctree: generated
 
-    tl.basic_tool
+    tl.label_transfer
 ```
 
 ## Plotting
@@ -34,6 +35,31 @@
 .. autosummary::
     :toctree: generated
 
-    pl.basic_plot
-    pl.BasicClass
+    pl.losses
+```
+
+## Models
+
+```{eval-rst}
+.. module:: cellpin.models
+.. currentmodule:: cellpin
+
+.. autosummary::
+    :toctree: generated
+
+    models.CellPin
+    models.CellPinVAE
+```
+
+## Dataset
+
+```{eval-rst}
+.. module:: cellpin.dataset
+.. currentmodule:: cellpin
+
+.. autosummary::
+    :toctree: generated
+
+    dataset.scAnnDataset
+    dataset.stAnnDataset
 ```

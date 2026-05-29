@@ -2,21 +2,7 @@
 
 .. currentmodule:: {{ module }}
 
-.. add toctree option to make autodoc generate the pages
-
 .. autoclass:: {{ objname }}
-
-{% block attributes %}
-{% if attributes %}
-Attributes table
-~~~~~~~~~~~~~~~~
-
-.. autosummary::
-{% for item in attributes %}
-    ~{{ name }}.{{ item }}
-{%- endfor %}
-{% endif %}
-{% endblock %}
 
 {% block methods %}
 {% if methods %}
@@ -25,9 +11,9 @@ Methods table
 
 .. autosummary::
 {% for item in methods %}
-    {%- if item != '__init__' %}
+    {%- if not item in inherited_members %}
     ~{{ name }}.{{ item }}
-    {%- endif -%}
+    {%- endif %}
 {%- endfor %}
 {% endif %}
 {% endblock %}
@@ -38,8 +24,9 @@ Attributes
 ~~~~~~~~~~
 
 {% for item in attributes %}
-
+    {%- if not item in inherited_members %}
 .. autoattribute:: {{ [objname, item] | join(".") }}
+    {%- endif %}
 {%- endfor %}
 
 {% endif %}
@@ -51,10 +38,9 @@ Methods
 ~~~~~~~
 
 {% for item in methods %}
-{%- if item != '__init__' %}
-
+    {%- if item != '__init__' and not item in inherited_members %}
 .. automethod:: {{ [objname, item] | join(".") }}
-{%- endif -%}
+    {%- endif -%}
 {%- endfor %}
 
 {% endif %}

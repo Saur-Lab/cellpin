@@ -216,18 +216,6 @@ def test_with_gene_symbols():
     assert st_ds.panel_genes == ["a", "b"]
 
 
-# ------------------------------------------------------------------ #
-# setup() alias                                                        #
-# ------------------------------------------------------------------ #
-
-
-def test_setup_alias_is_equivalent(sc_adata, st_adata):
-    sc_ds1, st_ds1 = setup_data(sc_adata=sc_adata, st_adata=st_adata)
-    sc_ds2, st_ds2 = setup(sc_adata=sc_adata, st_adata=st_adata)
-    assert sc_ds1.panel_genes == sc_ds2.panel_genes
-    assert st_ds1.panel_genes == st_ds2.panel_genes
-    assert isinstance(sc_ds2, scAnnDataset)
-    assert isinstance(st_ds2, stAnnDataset)
 
 
 # ------------------------------------------------------------------ #

@@ -1084,7 +1084,7 @@ class CellPin(pl.LightningModule):
 
         Example::
 
-            sc_dataset, _ = cellpin.pp.setup(sc_adata, st_adata)
+            sc_dataset, _ = cellpin.pp.setup_data(sc_adata, st_adata)
             model = cellpin.CellPin(sc_dataset)
             model.fit(sc_dataset)
         """
