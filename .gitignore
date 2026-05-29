@@ -18,6 +18,8 @@ build/
 .*cache/
 # Optuna test
 optuna_cellpin.py
+.pytest_cache/
+.ruff_cache/
 
 # Local scratch / mock scripts
 scratch_*.py
