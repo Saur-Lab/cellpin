@@ -65,6 +65,7 @@ doc = [
   "myst-nb>=1.1",
   "pandas",
   "sphinx>=8.1",
+  "sphinxcontrib-katex",
   "sphinx-autobuild",
   "sphinx-autodoc-typehints",
   "sphinx-book-theme>=1",
