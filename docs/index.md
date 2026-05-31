@@ -6,19 +6,30 @@
 :width: 800px
 ```
 
-**Cellpin:** A Student–Teacher Variational Model for Spatial Transcriptomics Imputation and Encoding.
+Cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
 
 ## Installation
 
-You need to have Python 3.11 or newer installed on your system.
-If you don't have Python installed, we recommend installing [uv](https://github.com/astral-sh/uv).
+Python 3.11 or newer is required.
 
-There are several alternative options to install cellpin:
-
-1. Install the latest development version:
+**pip**
 
 ```bash
 pip install cellpin
+```
+
+**uv**
+
+```bash
+uv pip install cellpin
+```
+
+For SpatialData support add the spatial extras:
+
+```bash
+pip install "cellpin[spatial]"
+# or
+uv pip install "cellpin[spatial]"
 ```
 
 ## Release notes
@@ -27,8 +38,7 @@ See the [changelog](changelog.md).
 
 ## Contact
 
-For questions and help requests, you can reach out in the [scverse discourse](https://discourse.scverse.org/).
-If you found a bug, please use the [issue tracker](https://github.com/Saur-Lab/cellpin/issues).
+If you found a bug or have a feature request, please use the [issue tracker](https://github.com/Saur-Lab/cellpin/issues).
 
 ## Citation
 
@@ -41,7 +51,6 @@ If you found a bug, please use the [issue tracker](https://github.com/Saur-Lab/c
 api.md
 changelog.md
 contributing.md
-references.md
 
 notebooks/cellpin_tutorial
 ```

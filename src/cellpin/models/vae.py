@@ -1,5 +1,4 @@
-"""
-CellPin hybrid VAE models.
+"""CellPin hybrid VAE models.
 
 - Two-view training (full-gene + panel-gene paths).
 - NB / ZINB / Poisson generative distributions.
@@ -251,7 +250,7 @@ class CellPinVAE(nn.Module):
             give_mean: Return the posterior mean rather than a sample.
             n_samples: MC samples for log-normal mean approximation.
 
-        Returns
+        Returns:
         -------
             Latent tensor ``(batch, n_latent)``.
         """
@@ -278,7 +277,7 @@ class CellPinVAE(nn.Module):
         Args:
             x: Panel expression tensor ``(batch, n_input_panel)``.
 
-        Returns
+        Returns:
         -------
             Library sample ``(batch, 1)``.
         """
@@ -308,7 +307,7 @@ class CellPinVAE(nn.Module):
             n_samples: Number of posterior samples to average.
             transform_batch: Decode under this batch instead of ``batch_index``.
 
-        Returns
+        Returns:
         -------
             Scale tensor ``(batch, n_input_full)``.
         """
@@ -337,7 +336,7 @@ class CellPinVAE(nn.Module):
             n_samples: Number of posterior samples.
             transform_batch: Decode under this batch instead of ``batch_index``.
 
-        Returns
+        Returns:
         -------
             Rate tensor ``(batch, n_input_full)``.
         """
@@ -372,7 +371,7 @@ class CellPinVAE(nn.Module):
             - ``px_r``: predicted variance σ² (softplus-transformed).
             - ``px_dropout``: ZIN zero-inflation logits (ignored for ``'normal'``).
 
-        Returns
+        Returns:
         -------
             Per-cell NLL ``(batch,)``.
         """
@@ -418,7 +417,7 @@ class CellPinVAE(nn.Module):
             n_samples: Draw multiple posterior samples (expand batch dim).
             transform_batch: Override batch index for the decoder.
 
-        Returns
+        Returns:
         -------
             Dict with keys:
             ``px_scale``, ``px_r``, ``px_rate``, ``px_dropout``,
@@ -523,7 +522,7 @@ class CellPinVAE(nn.Module):
             encoder_view: ``'panel'`` or ``'full'`` for latent inference.
             batch_index: Integer batch labels.
 
-        Returns
+        Returns:
         -------
             ``(reconst_loss + kl_l, kl_z, 0.0)``
         """

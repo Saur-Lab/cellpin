@@ -1,5 +1,5 @@
 # cellpin/models/__init__.py
-"""CellPin model classes"""
+"""CellPin model classes."""
 
 from cellpin.models.cellpin_model import CellPin
 from cellpin.models.vae import CellPinVAE

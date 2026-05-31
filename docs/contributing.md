@@ -163,19 +163,18 @@ to integrate the changes into yours.
 While the [pre-commit.ci][] is useful, we strongly encourage installing and running pre-commit locally first to understand its usage.
 
 Finally, most editors have an _autoformat on save_ feature.
-Consider enabling this option for [ruff][ruff-editors] and [biome][biome-editors].
+Consider enabling this option for [ruff][ruff-editors].
 
 [pre-commit]: https://pre-commit.com/
 [pre-commit.ci]: https://pre-commit.ci/
 [ruff-editors]: https://docs.astral.sh/ruff/integrations/
-[biome-editors]: https://biomejs.dev/guides/integrate-in-editor/
 
 (writing-tests)=
 
 ## Writing tests
 
 This package uses [pytest][] for automated testing.
-Please write {doc}`scanpy:dev/testing` for every function added to the package.
+Please write [tests][pytest] for every function added to the package.
 
 Most IDEs integrate with pytest and provide a GUI to run tests.
 Just point yours to one of the environments returned by
@@ -267,18 +266,18 @@ Please write documentation for new or changed features and use-cases.
 This project uses [sphinx][] with the following features:
 
 - The [myst][] extension allows to write documentation in markdown/Markedly Structured Text
-- [Numpy-style docstrings][numpydoc] (through the [napoloen][numpydoc-napoleon] extension).
+- [Google-style docstrings][google-style] (through the [napoleon][numpydoc-napoleon] extension).
 - Jupyter notebooks as tutorials through [myst-nb][] (See [Tutorials with myst-nb](#tutorials-with-myst-nb-and-jupyter-notebooks))
 - [sphinx-autodoc-typehints][], to automatically reference annotated input and output types
 - Citations (like {cite:p}`Virshup_2023`) can be included with [sphinxcontrib-bibtex](https://sphinxcontrib-bibtex.readthedocs.io/)
 
-See scanpy’s {doc}`scanpy:dev/documentation` for more information on how to write your own.
+See the [Sphinx napoleon docs][numpydoc-napoleon] for more information on how to write your own.
 
 [sphinx]: https://www.sphinx-doc.org/en/master/
 [myst]: https://myst-parser.readthedocs.io/en/latest/intro.html
 [myst-nb]: https://myst-nb.readthedocs.io/en/latest/
 [numpydoc-napoleon]: https://www.sphinx-doc.org/en/master/usage/extensions/napoleon.html
-[numpydoc]: https://numpydoc.readthedocs.io/en/latest/format.html
+[google-style]: https://google.github.io/styleguide/pyguide.html#38-comments-and-docstrings
 [sphinx-autodoc-typehints]: https://github.com/tox-dev/sphinx-autodoc-typehints
 
 ### Tutorials with myst-nb and jupyter notebooks

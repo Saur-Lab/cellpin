@@ -71,22 +71,16 @@ def losses(
 ) -> None:
     """Plot validation loss curves from a Lightning CSVLogger ``metrics.csv``.
 
-    Parameters
-    ----------
-    log_path:
-        Path to a ``metrics.csv`` file
-    keys:
-        Column names to plot, e.g. ``["val_loss", "val_reconst_loss"]``.
-        Defaults to ``["val_loss", "val_reconst_loss", "val_inv_loss"]``.
-        Pass ``"all"`` to show every available val loss.
-    smooth:
-        Width of a centered rolling-mean window. ``0`` (default) disables
-        smoothing.
-    figsize:
-        ``(width, height)`` in inches. Auto-sized from the number of panels
-        when omitted.
-    save:
-        If given, the figure is saved to this path at 300 dpi.
+    Args:
+        log_path: Path to a ``metrics.csv`` file or a directory containing one.
+        keys: Column names to plot, e.g. ``["val_loss", "val_reconst_loss"]``.
+            Defaults to ``["val_loss", "val_reconst_loss", "val_inv_loss"]``.
+            Pass ``"all"`` to show every available val loss.
+        smooth: Width of a centered rolling-mean window. ``0`` (default)
+            disables smoothing.
+        figsize: ``(width, height)`` in inches. Auto-sized from the number of
+            panels when omitted.
+        save: If given, the figure is saved to this path at 300 dpi.
     """
     log_path = Path(log_path)
     csv_path = _find_csv(log_path)

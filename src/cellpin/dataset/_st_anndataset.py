@@ -8,17 +8,18 @@ from torch.utils.data import Dataset
 
 
 class stAnnDataset(Dataset):
-    """Spatial AnnData dataset aligned to a panel gene list.
+    """Spatial AnnData dataset aligned to a panel gene list. Returned by ``cellpin.pp.setup_data()``.
 
-    Spatial dataset that returns expression aligned to an explicit ordered panel
-    gene list.
+    Slices and reorders ``adata`` columns to match ``panel_genes`` order on
+    construction, so ``__getitem__`` always returns genes in the model's
+    expected order.
 
-    Invariant:
-      - self.panel_genes defines the order of expr returned by __getitem__
-      - expr[k] corresponds to self.panel_genes[k]
-
-    local_l_mean / local_l_var are computed from the spatial data itself so
-    that the library encoder prior is consistent at inference time.
+    Args:
+        adata: Spatial AnnData object.
+        panel_genes: Ordered list of panel gene names. Must match the
+            ``sc_dataset.panel_genes`` order produced by ``setup_data``.
+        layer: Expression layer to read. When ``None``, ``.X`` is used.
+        gene_symbols: ``var`` column name for alternative gene identifiers.
     """
 
     def __init__(

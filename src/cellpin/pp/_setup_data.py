@@ -25,13 +25,30 @@ def setup_data(
     batch_key: str | None = None,
     table_key: str = "table",
 ) -> tuple[scAnnDataset, stAnnDataset]:
-    """
-    Prepare aligned single-cell and spatial datasets for CellPin.
+    """Prepare aligned single-cell and spatial datasets for cellpin.
 
-    Invariants guaranteed on return:
-      - sc_dataset.panel_genes == st_dataset.panel_genes  (same genes, same order)
-      - sc_dataset[i]["panel_expr"][k] and st_dataset[i]["full_expr"][k] are the same gene
-      - panel_genes order == ascending position order in sc_adata
+    Args:
+        sc_adata: Reference scRNA-seq AnnData. Its gene space becomes the
+            imputation target.
+        st_adata: Spatial AnnData (or SpatialData). Its genes define the panel.
+        gene_symbols: Name of a ``var`` column holding alternative gene
+            identifiers (e.g. human-readable symbols when ``var_names`` are
+            Ensembl IDs). When ``None``, ``var_names`` are used directly.
+        layer: Expression layer to read. Must contain raw counts (non-negative
+            integers) — required by the NB/ZINB generative model. When ``None``,
+            ``.X`` is used.
+        batch_key: ``obs`` column in ``sc_adata`` for batch conditioning. When
+            ``None``, batch correction is disabled.
+        table_key: Only relevant when ``st_adata`` is a ``SpatialData`` object;
+            specifies which table to read from ``sdata.tables``.
+
+    Returns:
+        Tuple of ``(scAnnDataset, stAnnDataset)`` — aligned datasets ready to
+        pass to :class:`~cellpin.models.CellPin`.
+
+    Raises:
+        ValueError: If gene names contain duplicates, no overlapping genes are
+            found, or internal alignment invariants are violated.
     """
     print(_SEP)
     print("[cellpin.pp.setup] Setting up CellPin datasets")

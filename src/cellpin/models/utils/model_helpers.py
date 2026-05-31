@@ -47,7 +47,7 @@ def load_config_and_checkpoint(config: dict[str, Any] | None = None, checkpoint:
         config: Configuration dictionary or path to YAML file. If None, uses defaults.
         checkpoint: Path to checkpoint file. If provided, loads params from it.
 
-    Returns
+    Returns:
     -------
         Tuple of (params dict, loaded_state_dict or None).
     """
@@ -96,7 +96,7 @@ def build_data_loaders(
         num_workers: Number of workers for data loading.
         seed: Random seed for splitting.
 
-    Returns
+    Returns:
     -------
         Tuple of (train_loader, val_loader).
     """

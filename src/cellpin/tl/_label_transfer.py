@@ -28,6 +28,28 @@ def label_transfer(
     random_state: int = 42,
     table_key: str = "table",
 ) -> tuple[float, ad.AnnData]:
+    """Transfer cell type labels from scRNA to spatial data via kNN in cellpin latent space.
+
+    If ``X_cellpin`` is absent from either adata, ``impute()`` is run automatically
+    with default settings and the embedding is stored back into the adata.
+
+    Args:
+        model: Trained :class:`~cellpin.models.CellPin` instance.
+        sc_adata: Single-cell AnnData with ground-truth cell type labels.
+        cell_type_col: Column in ``sc_adata.obs`` containing the cell type labels.
+        sp_adata: Spatial AnnData (or SpatialData) to annotate. Modified in-place:
+            ``sp_adata.obs["cellpin_annotation"]`` and
+            ``sp_adata.obs["cellpin_annotation_certainty"]`` are written.
+        conf_threshold: Min max-class probability to assign a label (default 0.0 =
+            annotate all). Cells below this threshold receive the label ``"Unknown"``.
+        k: Number of nearest neighbours (default 15).
+        test_size: Fraction of scRNA cells held out for evaluation (default 0.2).
+        random_state: Random seed for the train/test split (default 42).
+        table_key: Table key when ``sp_adata`` is a ``SpatialData`` object.
+
+    Returns:
+        Tuple of ``(test_accuracy, sp_adata)``.
+    """
     from cellpin.dataset import scAnnDataset, stAnnDataset
 
     sp_adata, sdata = _resolve_sdata(sp_adata, table_key)

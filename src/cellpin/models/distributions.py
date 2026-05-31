@@ -27,7 +27,7 @@ def log_nb_positive(
         theta: Inverse dispersion (theta -> inf gives Poisson).
         eps: Small constant for numerical stability.
 
-    Returns
+    Returns:
     -------
         Log-probability per element.
     """
@@ -59,7 +59,7 @@ def log_zinb_positive(
         zi_logits: Logits for the zero-inflation Bernoulli.
         eps: Small constant for numerical stability.
 
-    Returns
+    Returns:
     -------
         Log-probability per element.
     """
@@ -185,7 +185,7 @@ def log_zin(
         zi_logits: Zero-inflation logits (log π/(1−π)).
         eps: Numerical stability floor for σ.
 
-    Returns
+    Returns:
     -------
         Log-probability per element, same shape as ``x``.
     """

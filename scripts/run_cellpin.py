@@ -108,7 +108,7 @@ def run(args: argparse.Namespace) -> None:
         shuffle=False,
         num_workers=args.num_workers,
     )
-    adata_imputed = model.impute(dl, obs_adata=adata_sp, return_norm=False, nb_count_samples=20, return_int=False)
+    adata_imputed = model.impute(dl, obs_adata=adata_sp, return_norm=args.return_norm, nb_count_samples=20, return_int=args.return_int)
 
     out_path = output_dir / "cellpin_imputed.h5ad"
     adata_imputed.write_h5ad(str(out_path))
@@ -135,6 +135,9 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--freeze_pretrained", action=argparse.BooleanOptionalAction, default=False)
     p.add_argument("--decoder_warm_unfreeze_epoch", type=int, default=25)
+
+    p.add_argument("--return_int", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--return_norm", action=argparse.BooleanOptionalAction, default=True)
 
     p.add_argument("--precision", default="16-mixed")
     p.add_argument("--devices", type=int, nargs="+", default=[0])

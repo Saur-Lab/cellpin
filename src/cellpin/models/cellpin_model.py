@@ -1,5 +1,4 @@
-"""
-CellPin Model
+"""CellPin Model.
 
 Training pipeline
 -----------------
@@ -81,7 +80,20 @@ class CellPin(pl.LightningModule):
         sc_dataset: Training :class:`~cellpin.dataset.scAnnDataset` used to
             infer gene counts and panel size.
         config: Hyper-parameter dict, path to a YAML file, or ``None`` for
-            defaults.
+            defaults. Key parameters:
+
+            - ``n_latent`` (192): latent space dimensionality
+            - ``n_hidden`` (1024): encoder/decoder hidden width
+            - ``encoder_layers`` (16): number of residual blocks per encoder
+            - ``reconstruction_loss`` ("nb"): ``"nb"``, ``"zinb"``, ``"poisson"``, ``"normal"``, ``"zin"``
+            - ``distillation_mode`` ("mse"): ``"kl"`` or ``"mse"``
+            - ``reconstruct_panel`` (True): if ``False``, reconstruction loss on non-panel genes only
+            - ``kl_warmup_epochs`` (20): epochs for linear KL annealing from 0 to ``kl_weight``
+            - ``lambda_inv`` (20.0): weight on the invariance (distillation + SNN) loss
+            - ``exclude_panel`` (False): if ``True``, full encoder sees panel genes zeroed out
+            - ``lr`` (0.00021): AdamW learning rate
+
+            Full defaults in ``configs/cellpin_config.yaml``.
         checkpoint: Path to a ``.pt`` checkpoint to load weights from.
     """
 
@@ -201,7 +213,7 @@ class CellPin(pl.LightningModule):
         Args:
             stage: ``'pretrain'`` or ``'main'``.
 
-        Returns
+        Returns:
         -------
             Dict with keys ``'kl_weight'``, ``'recon'``, ``'inv'``.
         """
@@ -216,7 +228,7 @@ class CellPin(pl.LightningModule):
             stage: ``'pretrain'`` or ``'main'``.
             **weights: Key-value overrides, e.g. ``inv=2.0``, ``recon=1.5``.
 
-        Raises
+        Raises:
         ------
             KeyError: For unknown weight keys.
 
@@ -282,7 +294,7 @@ class CellPin(pl.LightningModule):
     def _kl_annealing_weight(self) -> float:
         """Compute the current KL annealing multiplier (linear warm-up).
 
-        Returns
+        Returns:
         -------
             Float in ``[0.0, 1.0]``.
         """
@@ -295,7 +307,7 @@ class CellPin(pl.LightningModule):
     # ------------------------------------------------------------------
 
     def _mixup_panel(self, x_panel: torch.Tensor) -> torch.Tensor:
-        """Intra-batch contamination mixup for the panel encoder input. Mimics missegmentation in spatial data
+        """Intra-batch contamination mixup for the panel encoder input; mimics missegmentation in spatial data.
 
         Each cell is blended with a randomly permuted cell from the same
         minibatch.  The contamination fraction ``alpha`` is sampled
@@ -349,7 +361,7 @@ class CellPin(pl.LightningModule):
             px_rate: Predicted NB rate ``(batch, n_genes)``.
             x_full:  Observed counts ``(batch, n_genes)``.
 
-        Returns
+        Returns:
         -------
             Scalar loss tensor.
         """
@@ -398,7 +410,7 @@ class CellPin(pl.LightningModule):
             batch: Must contain ``'full_expr'`` and ``'panel_expr'``.
                 Optionally ``'local_l_mean'``, ``'local_l_var'``, ``'batch_index'``.
 
-        Returns
+        Returns:
         -------
             Dict with scalar tensors: ``'loss'``, ``'reconst_loss'``,
             ``'kl_loss'``, ``'kl_l_loss'``.
@@ -469,7 +481,7 @@ class CellPin(pl.LightningModule):
         }
 
     def compute_losses(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Main training losses
+        """Main training losses.
 
         Objective:
 
@@ -484,7 +496,7 @@ class CellPin(pl.LightningModule):
             batch: Must contain ``'full_expr'`` and ``'panel_expr'``.
                 Optionally ``'local_l_mean'``, ``'local_l_var'``, ``'batch_index'``.
 
-        Returns
+        Returns:
         -------
             Dict with scalar tensors: ``'loss'``, ``'reconst_loss'``,
             ``'kl_loss'``, ``'kl_l_loss'``, ``'distill_loss'``,
@@ -684,7 +696,7 @@ class CellPin(pl.LightningModule):
                 ``trainer_kwargs['max_epochs']`` if present).
             **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
 
-        Returns
+        Returns:
         -------
             Fitted :class:`~cellpin.training.CellPinTrainer`.
         """
@@ -743,11 +755,11 @@ class CellPin(pl.LightningModule):
                 decoder.
             **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
 
-        Returns
+        Returns:
         -------
             Fitted :class:`~cellpin.training.CellPinTrainer`.
 
-        Raises
+        Raises:
         ------
             RuntimeError: If ``require_pretrained=True``, ``freeze_pretrained=True``,
                 and pretraining has not been completed.
@@ -825,7 +837,7 @@ class CellPin(pl.LightningModule):
                 :class:`~cellpin.dataset.stAnnDataset`.
             use_mean: Return the posterior mean rather than a sample.
 
-        Returns
+        Returns:
         -------
             Float32 array ``(n_cells, n_latent)``.
         """
@@ -1014,14 +1026,14 @@ class CellPin(pl.LightningModule):
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
-        Returns
+        Returns:
         -------
             :class:`anndata.AnnData` with ``X`` = imputed counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']``.
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
-        Raises
+        Raises:
         ------
             ValueError: If ``obs_adata`` has the wrong number of cells.
         """
@@ -1159,7 +1171,7 @@ class CellPin(pl.LightningModule):
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
-        Returns
+        Returns:
         -------
             :class:`anndata.AnnData` with ``X`` = imputed (float or int) counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']`` = copy of
@@ -1167,7 +1179,7 @@ class CellPin(pl.LightningModule):
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
-        Raises
+        Raises:
         ------
             ValueError: If ``obs_adata`` has the wrong number of cells, or if
                 ``area_key`` is specified but not found in ``adata.obs``, or if

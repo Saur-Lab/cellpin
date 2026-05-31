@@ -10,7 +10,7 @@ from torch.utils.data import Dataset
 
 
 class scAnnDataset(Dataset):
-    """scRNA-seq AnnData dataset wrapper.
+    """scRNA-seq AnnData dataset wrapper. Returned by ``cellpin.pp.setup_data()``.
 
     Outputs (per observation):
         - full_expr:     full expression row (all genes, stable order)
@@ -19,6 +19,19 @@ class scAnnDataset(Dataset):
         - local_l_mean:  dataset-level mean of log-library size (1,)
         - local_l_var:   dataset-level variance of log-library size (1,)
         - batch_index:   integer batch label (only when batch_key is set)
+
+    Args:
+        adata: scRNA-seq AnnData object.
+        layer: Expression layer to read. Must be raw counts. When ``None``,
+            ``.X`` is used.
+        gene_symbols: ``var`` column name for alternative gene identifiers
+            (same semantics as in ``setup_data``).
+        panel: Ordered list of panel gene names. Internally, panel gene order
+            is fixed to ascending position in ``adata`` (boolean-mask order),
+            so ``panel_expr[k]`` always corresponds to genes in that order,
+            not the order of the ``panel`` argument.
+        batch_key: ``obs`` column for integer batch labels. When ``None``,
+            batch conditioning is off.
     """
 
     def __init__(

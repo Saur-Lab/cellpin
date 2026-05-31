@@ -1,5 +1,4 @@
-"""
-Neural network building blocks for CellPin VAE models.
+"""Neural network building blocks for CellPin VAE models.
 
 Public API
 ----------
@@ -37,7 +36,7 @@ def one_hot(index: torch.Tensor, n_cat: int) -> torch.Tensor:
         index: Integer tensor of shape ``(batch,)``.
         n_cat: Number of categories.
 
-    Returns
+    Returns:
     -------
         Float tensor of shape ``(batch, n_cat)``.
     """
@@ -259,7 +258,7 @@ class Encoder(nn.Module):
         Args:
             x: Expression tensor ``(batch, n_input)``.
 
-        Returns
+        Returns:
         -------
             ``(q_mean, q_var, z)`` — posterior mean, variance, and sample.
         """
@@ -403,7 +402,7 @@ class DecoderSCVI(nn.Module):
             library: Log-library tensor ``(batch, 1)``.
             *cat_list: Optional categorical covariates.
 
-        Returns
+        Returns:
         -------
             ``(px_scale, px_r, px_rate, px_dropout)``
         """
@@ -461,7 +460,7 @@ class DecoderNormal(nn.Module):
             z: Latent tensor ``(batch, n_latent)``.
             *cat_list: Optional categorical covariates.
 
-        Returns
+        Returns:
         -------
             ``(px_mu, px_sigma2, px_dropout)``:
             - ``px_mu``: predicted mean per gene.

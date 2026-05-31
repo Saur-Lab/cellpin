@@ -36,9 +36,13 @@ def load_sc_example(
     cache_dir: str | pathlib.Path | None = None,
     force_download: bool = False,
 ) -> ad.AnnData:
-    """Load the single-cell example dataset used by CellPin tutorials.
+    """Load the single-cell example dataset used by cellpin tutorials.
 
-    Downloads ``sc_example.h5ad`` from the CellPin data repository into a
+    Data from the 10x Genomics Xenium preview dataset (human breast, In Situ
+    Sample 1, Replicate 1). This is the matching FRP (Fixed RNA Profiling)
+    scRNA-seq sample.
+
+    Downloads ``sc_example.h5ad`` from the cellpin data repository into a
     local cache directory on first use and then loads it with ``anndata``.
 
     Args:
@@ -47,8 +51,7 @@ def load_sc_example(
         force_download: If ``True``, always re-download the file even when a
             cached copy exists.
 
-    Returns
-    -------
+    Returns:
         Loaded single-cell example ``AnnData``.
     """
     path = _download_if_needed(
@@ -64,9 +67,12 @@ def load_sp_example(
     cache_dir: str | pathlib.Path | None = None,
     force_download: bool = False,
 ) -> ad.AnnData:
-    """Load the spatial example dataset used by CellPin tutorials.
+    """Load the spatial example dataset used by cellpin tutorials.
 
-    Downloads ``sp_example.h5ad`` from the CellPin data repository into a
+    Data from the 10x Genomics Xenium preview dataset (human breast, In Situ
+    Sample 1, Replicate 1). This is the Xenium in-situ panel.
+
+    Downloads ``sp_example.h5ad`` from the cellpin data repository into a
     local cache directory on first use and then loads it with ``anndata``.
 
     Args:
@@ -75,8 +81,7 @@ def load_sp_example(
         force_download: If ``True``, always re-download the file even when a
             cached copy exists.
 
-    Returns
-    -------
+    Returns:
         Loaded spatial example ``AnnData``.
     """
     path = _download_if_needed(

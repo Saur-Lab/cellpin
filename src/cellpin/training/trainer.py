@@ -192,7 +192,7 @@ class CellPinTrainer:
             val_dataloader: DataLoader for validation data.
             ckpt_path: Path to checkpoint to load.
 
-        Returns
+        Returns:
         -------
             list[dict[str, float]]: List of validation metrics dictionaries.
         """
@@ -208,15 +208,14 @@ class CellPinTrainer:
         test_dataloader: DataLoader,
         ckpt_path: str | None = None,
     ) -> list[dict[str, float]]:
-        """
-        Run testing on the model.
+        """Run testing on the model.
 
         Args:
             model: LightningModule to test
             test_dataloader: DataLoader for test data
             ckpt_path: Path to checkpoint to load
 
-        Returns
+        Returns:
         -------
             List of test metrics dictionaries
         """
