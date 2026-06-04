@@ -1,9 +1,26 @@
+<p align="center">
+  <img src="docs/_static/cellpin_fig1.png" width="800" alt="CellPin overview"/>
+</p>
+
 # cellpin
 
-[![Tests][badge-tests]][tests]
-[![Documentation][badge-docs]][documentation]
+[![Documentation](https://readthedocs.org/projects/cellpin/badge/?version=latest)](https://cellpin.readthedocs.io)
 
-Cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
+cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
+
+## Quickstart
+
+```python
+import cellpin
+from torch.utils.data import DataLoader
+
+sc_ds, st_ds = cellpin.pp.setup_data(sc_adata, st_adata)
+model = cellpin.CellPin(sc_ds)
+model.fit(sc_ds)
+
+loader = DataLoader(st_ds, batch_size=256, shuffle=False)
+adata_out = model.impute(loader, obs_adata=st_adata)
+```
 
 ## Installation
 
