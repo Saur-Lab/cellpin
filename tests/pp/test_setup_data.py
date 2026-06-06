@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from cellpin.dataset import scAnnDataset, stAnnDataset
-from cellpin.pp import setup, setup_data
+from cellpin.pp import setup_data
 
 # ------------------------------------------------------------------ #
 # Fixtures                                                             #
