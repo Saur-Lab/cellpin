@@ -2,7 +2,7 @@
 
 ```{image} _static/cellpin_fig1.png
 :align: center
-:alt: CellPin Model Overview
+:alt: cellpin Model Overview
 :width: 800px
 ```
 
