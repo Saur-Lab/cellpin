@@ -50,7 +50,7 @@ Full documentation, tutorials, and API reference: [cellpin.readthedocs.io](https
 
 ## Citation
 
-If you use CellPin in your research, please cite:
+If you use cellpin in your research, please cite:
 
 > Putze P\*, Lucarelli D\*, Wellappili D, Bahrami M, Luecken MD, Theis FJ, Saur D.
 > **Cellpin enables reference-based imputation and denoising of spatial transcriptomes.**
@@ -69,3 +69,4 @@ If you use CellPin in your research, please cite:
   url     = {https://doi.org/10.64898/2026.06.02.729566}
 }
 ```
+
