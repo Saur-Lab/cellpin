@@ -7,7 +7,7 @@
 [![Documentation](https://readthedocs.org/projects/cellpin/badge/?version=latest)](https://cellpin.readthedocs.io)
 
 cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
-
+Read the documentation for detailed tutorials. 
 ## Quickstart
 
 ```python
