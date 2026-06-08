@@ -53,4 +53,5 @@ changelog.md
 contributing.md
 
 notebooks/cellpin_tutorial
+notebooks/label_transfer
 ```
