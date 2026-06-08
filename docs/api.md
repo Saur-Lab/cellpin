@@ -48,7 +48,6 @@
     :toctree: generated
 
     models.CellPin
-    models.CellPinVAE
 ```
 
 ## Dataset
