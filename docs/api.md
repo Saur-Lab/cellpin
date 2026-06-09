@@ -53,7 +53,7 @@
 ### Model methods
 
 ```{eval-rst}
-.. currentmodule:: cellpin.models.CellPin
+.. currentmodule:: cellpin.models
 
 .. autosummary::
     :toctree: generated
