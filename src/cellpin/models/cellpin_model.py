@@ -15,7 +15,7 @@ Additional features
 -------------------
 * KL annealing (linear warm-up over ``kl_warmup_epochs`` epochs).
 * Per-stage configurable loss weights.
-* ``get_cell_embedding``, ``embed_and_impute``, ``impute_to_anndata`` API.
+* ``get_cell_embedding``, ``embed_and_impute`` API.
 * ``fit()`` convenience wrapper: pretrain → train in one call.
 """
 
@@ -963,11 +963,16 @@ class CellPin(pl.LightningModule):
         counts: np.ndarray,
         embeddings: np.ndarray,
         obs_adata: ad.AnnData | None,
+        return_sparse: bool = True,
     ) -> ad.AnnData:
-        """Build the base output AnnData shared by impute() and impute_to_anndata().
+        """Build the base output AnnData for impute().
 
         Sets var_names, X_cellpin embedding, and copies obs/obsm/layers from obs_adata.
+        Genes absent from obs_adata layers are filled with 0; var['is_measured'] marks
+        which genes were present in obs_adata.
         """
+        import scipy.sparse as sp
+
         adata_out = ad.AnnData(X=counts)
         adata_out.var_names = self.gene_names
         adata_out.obsm["X_cellpin"] = embeddings
@@ -984,72 +989,26 @@ class CellPin(pl.LightningModule):
                 out_gene_idx = {g: i for i, g in enumerate(adata_out.var_names)}
                 src_cols = [out_gene_idx[g] for g in obs_adata.var_names if g in out_gene_idx]
                 src_mask = [g in out_gene_idx for g in obs_adata.var_names]
+                n_missing = adata_out.n_vars - len(src_cols)
+                if n_missing > 0:
+                    print(f"  [impute] Filling {n_missing} gene(s) absent from obs_adata layers with 0")
                 for lyr_key, lyr_val in obs_adata.layers.items():
                     if hasattr(lyr_val, "toarray"):
                         lyr_val = lyr_val.toarray()
-                    print(
-                        f"  [impute] Filling {adata_out.n_vars - len(src_cols)} "
-                        "gene(s) absent from obs_adata layers with sentinel -2.0"
-                    )
-                    mat = np.full((adata_out.n_obs, adata_out.n_vars), -2.0, dtype=np.float32)
+                    mat = np.zeros((adata_out.n_obs, adata_out.n_vars), dtype=np.float32)
                     mat[:, src_cols] = np.asarray(lyr_val, dtype=np.float32)[:, src_mask]
-                    adata_out.layers[lyr_key] = mat
+                    adata_out.layers[lyr_key] = sp.csr_matrix(mat) if return_sparse else mat
 
-        return adata_out
+            # Mark which genes were measured in obs_adata
+            measured = np.zeros(adata_out.n_vars, dtype=bool)
+            out_gene_set = set(adata_out.var_names)
+            for i, g in enumerate(adata_out.var_names):
+                measured[i] = g in set(obs_adata.var_names) and g in out_gene_set
+            adata_out.var["is_measured"] = measured
+        else:
+            # No obs_adata: all output genes are considered measured (imputed from sc ref)
+            adata_out.var["is_measured"] = np.ones(adata_out.n_vars, dtype=bool)
 
-    @torch.no_grad()
-    def impute_to_anndata(
-        self,
-        dataloader: torch.utils.data.DataLoader,
-        obs_adata: ad.AnnData | None = None,
-        use_mean: bool = True,
-        mc_impute: bool = False,
-        mc_samples: int = 50,
-        mask_fraction: float = 0.2,
-        table_key: str = "table",
-    ) -> ad.AnnData:
-        """Impute full-gene expression and return as AnnData.
-
-        Args:
-            dataloader: DataLoader to run inference on.
-            obs_adata: Optional AnnData (or :class:`spatialdata.SpatialData`) whose
-                ``.obs`` is copied to the output. If SpatialData, the AnnData is read
-                from ``obs_adata.tables[table_key]`` and the result is returned as an
-                updated SpatialData object.  Must have the same number of observations.
-            use_mean: Use posterior mean for the latent (deterministic).
-                Ignored when ``mc_impute=True``.
-            mc_impute: Use MC averaging over ``mc_samples`` stochastic forward
-                passes (recommended; ~+0.01 mean Pearson over deterministic).
-            mc_samples: Number of MC samples (default 50).
-            mask_fraction: Fraction of panel genes randomly zeroed per MC pass
-                (default 0.2).
-            table_key: Table name to read/write when ``obs_adata`` is a SpatialData
-                object (default ``"table"``).
-
-        Returns:
-        -------
-            :class:`anndata.AnnData` with ``X`` = imputed counts,
-            ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']``.
-            If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
-            with the result stored in ``sdata.tables[table_key]``.
-
-        Raises:
-        ------
-            ValueError: If ``obs_adata`` has the wrong number of cells.
-        """
-        obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
-        embeddings, imputed_arr, _ = self.embed_and_impute(
-            dataloader,
-            use_mean=use_mean,
-            mc_impute=mc_impute,
-            mc_samples=mc_samples,
-            mask_fraction=mask_fraction,
-        )
-        adata_out = self._build_output_anndata(imputed_arr, embeddings, obs_adata)
-        adata_out.layers["imputed"] = adata_out.X.copy()
-        if sdata is not None:
-            sdata.tables[table_key] = adata_out
-            return sdata
         return adata_out
 
     def fit(
@@ -1135,14 +1094,10 @@ class CellPin(pl.LightningModule):
         area_key: str | None = None,
         nb_count_samples: int = 100,
         return_int: bool = False,
+        return_sparse: bool = True,
         table_key: str = "table",
     ) -> ad.AnnData:
         """Impute with MC averaging and optional count-space normalisation.
-
-        More complete than :meth:`impute_to_anndata`: adds MC dropout, integer
-        rounding, and area-normalised log-normalised layers.  Use
-        :meth:`impute_to_anndata` when you only need embeddings + raw imputed
-        counts.
 
         Args:
             dataloader: DataLoader to run inference on.
@@ -1168,6 +1123,9 @@ class CellPin(pl.LightningModule):
                 ``log1p(norm(E[X])) > E[log1p(norm(X))]``; sampling inside the
                 transform corrects this bias.  More samples → lower variance.
             return_int: If ``True``, round ``X`` to integer counts (``int32``).
+            return_sparse: If ``True`` (default), store ``X``, ``layers['imputed']``,
+                and ``layers['imputed_norm']`` as :class:`scipy.sparse.csr_matrix`.
+                Set to ``False`` to keep dense numpy arrays.
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
@@ -1176,6 +1134,8 @@ class CellPin(pl.LightningModule):
             :class:`anndata.AnnData` with ``X`` = imputed (float or int) counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']`` = copy of
             ``X``, and optionally ``layers['imputed_norm']``.
+            ``var['is_measured']`` marks genes present in ``obs_adata`` (all ``True``
+            when ``obs_adata`` is ``None``).
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
@@ -1185,6 +1145,8 @@ class CellPin(pl.LightningModule):
                 ``area_key`` is specified but not found in ``adata.obs``, or if
                 any cell area is ≤ 0.
         """
+        import scipy.sparse as sp
+
         obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
 
         embeddings, counts, log_library = self.embed_and_impute(
@@ -1200,8 +1162,11 @@ class CellPin(pl.LightningModule):
         if return_int:
             counts = np.round(counts, decimals=0).astype(np.int32)
 
-        adata_out = self._build_output_anndata(counts, embeddings, obs_adata)
-        adata_out.layers["imputed"] = counts.copy()
+        adata_out = self._build_output_anndata(counts, embeddings, obs_adata, return_sparse=return_sparse)
+
+        imputed = sp.csr_matrix(counts) if return_sparse else counts.copy()
+        adata_out.X = imputed
+        adata_out.layers["imputed"] = imputed
 
         if return_norm:
             # MC estimate of E[log1p(norm(X))] where X ~ NB(mu, theta).
@@ -1240,7 +1205,8 @@ class CellPin(pl.LightningModule):
                     normed = draw * (norm_target_sum / lib)
                 log1p_acc += np.log1p(normed)
 
-            adata_out.layers["imputed_norm"] = (log1p_acc / K).astype(np.float32)
+            norm_layer = (log1p_acc / K).astype(np.float32)
+            adata_out.layers["imputed_norm"] = sp.csr_matrix(norm_layer) if return_sparse else norm_layer
 
         if sdata is not None:
             sdata.tables[table_key] = adata_out

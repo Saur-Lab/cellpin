@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## [0.1.1] - 2026-06-10
+
+- Changed to sparse outputs
+- Removed dead code
+
+### Added
+
+- Initial release with basic tool, preprocessing and plotting functions
+
 ## [0.0.1] - 2026-05-29
 
 ### Added
