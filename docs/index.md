@@ -42,7 +42,7 @@ If you found a bug or have a feature request, please use the [issue tracker](htt
 
 ## Citation
 
-> t.b.a
+Putze P*, Lucarelli D*, Wellappili D, Bahrami M, Luecken MD, Theis FJ, Saur D. Cellpin enables reference-based imputation and denoising of spatial transcriptomes. bioRxiv 2026.06.02.729566. doi: 10.64898/2026.06.02.729566
 
 ```{toctree}
 :hidden: true
