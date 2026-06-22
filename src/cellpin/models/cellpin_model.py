@@ -41,6 +41,13 @@ from cellpin.models.utils import (
     load_config_and_checkpoint,
     save_checkpoint,
 )
+from cellpin.models.atlas_match import (
+    AtlasMatchNet,
+    EMACallback,
+    dist_match_loss,
+    knn_overlap,
+    per_dim_r2,
+)
 from cellpin.models.vae import CellPinVAE
 from cellpin.pl import PlotAccessor
 from cellpin.tl import TLAccessor
@@ -65,6 +72,21 @@ def soft_nn_loss(
     loss_pf = F.cross_entropy(logits, targets)
     loss_fp = F.cross_entropy(logits.T, targets)
     return 0.5 * (loss_pf + loss_fp)
+
+
+class _IndexedDataset(torch.utils.data.Dataset):
+    """Wraps a dataset and injects ``cell_idx`` (integer row index) into every batch dict."""
+
+    def __init__(self, base: torch.utils.data.Dataset) -> None:
+        self._base = base
+
+    def __len__(self) -> int:
+        return len(self._base)
+
+    def __getitem__(self, idx: int) -> dict:
+        out = self._base[idx]
+        out["cell_idx"] = torch.tensor(idx, dtype=torch.long)
+        return out
 
 
 class CellPin(pl.LightningModule):
@@ -186,7 +208,9 @@ class CellPin(pl.LightningModule):
         # At inference, observed panel values are copied into the decoder output.
         self._reconstruct_panel: bool = bool(getattr(self, "reconstruct_panel", True))
 
-        self._training_stage: Literal["pretrain", "main"] = "main"
+        self._training_stage: Literal["pretrain", "main", "emb_match"] = "main"
+        self._atlas_emb: torch.Tensor | None = None  # set by match_emb()
+        self.atlas_net: AtlasMatchNet | None = None  # built by match_emb()
         self._pretrain_completed: bool = False
         self._freeze_pretrained_in_main: bool = True
         self._decoder_warm_unfreeze_epoch: int = int(getattr(self, "decoder_warm_unfreeze_epoch", -1))
@@ -276,7 +300,7 @@ class CellPin(pl.LightningModule):
 
     def on_train_epoch_start(self) -> None:
         """Warm-unfreeze decoder parameters when scheduled."""
-        if self._training_stage not in ("main",):
+        if self._training_stage not in ("main", "emb_match"):
             return
         if self._decoder_warm_unfreeze_epoch < 0 or self._decoder_unfrozen:
             return
@@ -606,6 +630,80 @@ class CellPin(pl.LightningModule):
             "pearson_loss": pearson_loss,
         }
 
+    def compute_losses_emb(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Atlas-matching losses: reproduce the atlas embedding from the panel.
+
+        Pure supervised representation regression — **no** reconstruction, KL,
+        or library terms.  The trainable :class:`~cellpin.models.atlas_match.AtlasMatchNet`
+        encodes two independently augmented views of the panel; each is matched
+        to the standardised atlas target ``z*`` and to the other view.
+
+        Loss terms (weights are config keys with sensible defaults):
+
+        * ``distill``      — ``MSE(ẑ, z*)`` per-dimension distillation (primary),
+        * ``consistency``  — ``MSE(ẑ₁, ẑ₂)`` augmentation invariance,
+        * ``cos``          — ``1 − cos(ẑ, z*)`` directional match,
+        * ``dist``         — pairwise-distance match (opt-in, differentiable
+          surrogate for kNN-overlap; weight ``atlas_dist_weight`` default ``0``,
+          always logged as ``dist_loss``).
+
+        Args:
+            batch: Must contain ``'panel_expr'`` and ``'cell_idx'``.
+
+        Returns:
+        -------
+            Dict with scalar tensors: ``'loss'``, ``'distill_loss'``,
+            ``'consistency_loss'``, ``'cos_loss'``, ``'dist_loss'``.
+        """
+        if self._atlas_emb is None or self.atlas_net is None:
+            raise RuntimeError("call match_emb() before training in 'emb_match' mode.")
+
+        x_panel = batch["panel_expr"]
+        cell_idx = batch["cell_idx"].cpu()
+
+        # Atlas target slice — index on CPU, move to device, standardise (no grad).
+        z_atlas = self._atlas_emb[cell_idx].to(x_panel.device).detach()
+        z_star = self.atlas_net.standardize_target(z_atlas)
+
+        # Two independently augmented views → predicted (standardised) embeddings.
+        v1 = self.atlas_net(self._mixup_panel(self._poisson_resample_panel(x_panel)))
+        v2 = self.atlas_net(self._mixup_panel(self._poisson_resample_panel(x_panel)))
+
+        distill_loss = 0.5 * (F.mse_loss(v1, z_star) + F.mse_loss(v2, z_star))
+        consistency_loss = F.mse_loss(v1, v2)
+        cos_loss = 1.0 - 0.5 * (
+            F.cosine_similarity(v1, z_star, dim=1).mean() + F.cosine_similarity(v2, z_star, dim=1).mean()
+        )
+
+        lam_distill = float(getattr(self, "atlas_distill_weight", 1.0))
+        lam_consistency = float(getattr(self, "atlas_consistency_weight", 1.0))
+        lam_cos = float(getattr(self, "atlas_cos_weight", 0.1))
+        # Opt-in pairwise-distance term: differentiable surrogate for kNN-overlap.
+        # Always computed for logging; contributes to the total only when weighted.
+        lam_dist = float(getattr(self, "atlas_dist_weight", 0.0))
+        dist_loss = 0.5 * (dist_match_loss(v1, z_star) + dist_match_loss(v2, z_star))
+
+        total = (
+            lam_distill * distill_loss
+            + lam_consistency * consistency_loss
+            + lam_cos * cos_loss
+            + lam_dist * dist_loss
+        )
+
+        out = {
+            "loss": total,
+            "distill_loss": distill_loss,
+            "consistency_loss": consistency_loss,
+            "cos_loss": cos_loss,
+            "dist_loss": dist_loss,
+            # Non-scalar; consumed by _shared_step for epoch-level eval metrics
+            # (per-dim R² + kNN-overlap), never logged directly. At eval time the
+            # augmentations are no-ops, so v1 is the clean deterministic prediction.
+            "_pred": v1.detach(),
+            "_target": z_star,
+        }
+        return out
+
     # ------------------------------------------------------------------
     # Lightning hooks
     # ------------------------------------------------------------------
@@ -626,6 +724,8 @@ class CellPin(pl.LightningModule):
     ) -> torch.Tensor:
         if self._training_stage == "pretrain":
             losses = self.compute_pretrain_losses(batch)
+        elif self._training_stage == "emb_match":
+            losses = self.compute_losses_emb(batch)
         else:
             losses = self.compute_losses(batch)
 
@@ -641,7 +741,45 @@ class CellPin(pl.LightningModule):
             if isinstance(val, torch.Tensor) and val.ndim == 0:
                 self.log(f"{prefix}_{name}", val, **log_kw)
 
+        # Accumulate clean val predictions/targets for epoch-level atlas metrics.
+        if prefix == "val" and self._training_stage == "emb_match" and "_pred" in losses:
+            self._val_pred_buf.append(losses["_pred"].detach().cpu())
+            self._val_target_buf.append(losses["_target"].detach().cpu())
+
         return losses["loss"]
+
+    def on_validation_epoch_start(self) -> None:
+        """Reset buffers that collect atlas predictions/targets for metrics."""
+        if self._training_stage == "emb_match":
+            self._val_pred_buf: list[torch.Tensor] = []
+            self._val_target_buf: list[torch.Tensor] = []
+
+    def on_validation_epoch_end(self) -> None:
+        """Log per-dim R² and kNN-overlap for the atlas-matching stage.
+
+        These are the metrics that actually mean "reproduce the embedding":
+        ``val_r2_mean``/``val_r2_min`` measure pointwise coordinate fit in
+        standardised target space, while ``val_knn_overlap`` measures whether the
+        atlas neighbour structure is preserved (what the UMAP overlap shows).
+        """
+        if self._training_stage != "emb_match" or not getattr(self, "_val_pred_buf", None):
+            return
+        pred = torch.cat(self._val_pred_buf)
+        target = torch.cat(self._val_target_buf)
+        r2 = per_dim_r2(pred, target)
+        k = int(getattr(self, "atlas_knn_k", 15))
+        overlap = knn_overlap(pred, target, k=k)
+
+        self.log("val_r2_mean", r2.mean().to(self.device), prog_bar=True, sync_dist=True)
+        self.log("val_r2_min", r2.min().to(self.device), sync_dist=True)
+        self.log(
+            "val_knn_overlap",
+            torch.tensor(overlap, device=self.device),
+            prog_bar=True,
+            sync_dist=True,
+        )
+        self._val_pred_buf = []
+        self._val_target_buf = []
 
     # Optimiser
 
@@ -963,11 +1101,16 @@ class CellPin(pl.LightningModule):
         counts: np.ndarray,
         embeddings: np.ndarray,
         obs_adata: ad.AnnData | None,
+        return_sparse: bool = True,
     ) -> ad.AnnData:
-        """Build the base output AnnData shared by impute() and impute_to_anndata().
+        """Build the base output AnnData for impute().
 
         Sets var_names, X_cellpin embedding, and copies obs/obsm/layers from obs_adata.
+        Genes absent from obs_adata layers are filled with 0; var['is_measured'] marks
+        which genes were present in obs_adata.
         """
+        import scipy.sparse as sp
+
         adata_out = ad.AnnData(X=counts)
         adata_out.var_names = self.gene_names
         adata_out.obsm["X_cellpin"] = embeddings
@@ -984,16 +1127,25 @@ class CellPin(pl.LightningModule):
                 out_gene_idx = {g: i for i, g in enumerate(adata_out.var_names)}
                 src_cols = [out_gene_idx[g] for g in obs_adata.var_names if g in out_gene_idx]
                 src_mask = [g in out_gene_idx for g in obs_adata.var_names]
+                n_missing = adata_out.n_vars - len(src_cols)
+                if n_missing > 0:
+                    print(f"  [impute] Filling {n_missing} gene(s) absent from obs_adata layers with 0")
                 for lyr_key, lyr_val in obs_adata.layers.items():
                     if hasattr(lyr_val, "toarray"):
                         lyr_val = lyr_val.toarray()
-                    print(
-                        f"  [impute] Filling {adata_out.n_vars - len(src_cols)} "
-                        "gene(s) absent from obs_adata layers with sentinel -2.0"
-                    )
-                    mat = np.full((adata_out.n_obs, adata_out.n_vars), -2.0, dtype=np.float32)
+                    mat = np.zeros((adata_out.n_obs, adata_out.n_vars), dtype=np.float32)
                     mat[:, src_cols] = np.asarray(lyr_val, dtype=np.float32)[:, src_mask]
-                    adata_out.layers[lyr_key] = mat
+                    adata_out.layers[lyr_key] = sp.csr_matrix(mat) if return_sparse else mat
+
+            # Mark which genes were measured in obs_adata
+            measured = np.zeros(adata_out.n_vars, dtype=bool)
+            out_gene_set = set(adata_out.var_names)
+            for i, g in enumerate(adata_out.var_names):
+                measured[i] = g in set(obs_adata.var_names) and g in out_gene_set
+            adata_out.var["is_measured"] = measured
+        else:
+            # No obs_adata: all output genes are considered measured (imputed from sc ref)
+            adata_out.var["is_measured"] = np.ones(adata_out.n_vars, dtype=bool)
 
         return adata_out
 
@@ -1123,6 +1275,194 @@ class CellPin(pl.LightningModule):
             **shared,
         )
 
+    def match_emb(
+        self,
+        dataset: scAnnDataset,
+        emb_key: str,
+        train_epochs: int = 60,
+        batch_size: int = 256,
+        gradient_clip_val: float = 0.5,
+        early_stopping_patience: int = 10,
+        train_size: float = 0.8,
+        save_checkpoints: bool = False,
+        output_dir: str = "./cellpin_output",
+        custom_callbacks: list | None = None,
+        **trainer_kwargs,
+    ):
+        """Train a decoder-free network to reproduce an atlas embedding.
+
+        Skips Stage 1 (pre-training) and the VAE entirely.  A dedicated
+        :class:`~cellpin.models.atlas_match.AtlasMatchNet` is trained to map the
+        (augmented, fixed) gene panel onto the embedding stored in
+        ``dataset.adata.obsm[emb_key]`` (e.g. from scVI).  There is **no**
+        reconstruction, KL, or library objective — only embedding matching.
+
+        The embedding dimension is detected automatically and becomes the
+        network's output dimension.  Per-gene input statistics and per-dimension
+        target statistics are computed from ``dataset`` and stored as buffers on
+        the network, so predictions are returned in the original atlas space.
+
+        After training, call :meth:`embed_atlas` to obtain matched embeddings
+        for spatial (or single-cell) panels.  This path produces embeddings
+        only — it does not impute full-gene counts.
+
+        Args:
+            dataset: Single-cell dataset (the same one used to build the model).
+            emb_key: Key in ``dataset.adata.obsm`` pointing to the atlas
+                embedding array of shape ``(n_cells, emb_dim)``.
+            train_epochs: Maximum training epochs.
+            batch_size: Mini-batch size.
+            gradient_clip_val: Gradient clipping value.
+            early_stopping_patience: Epochs without improvement before stopping.
+            train_size: Fraction of cells used for training.
+            save_checkpoints: Save model checkpoints to ``output_dir``.
+            output_dir: Root directory for checkpoints and logs.
+            custom_callbacks: Extra PyTorch-Lightning callbacks.
+            **trainer_kwargs: Forwarded to
+                :class:`~cellpin.training.CellPinTrainer` (e.g. ``devices``,
+                ``precision``, ``accelerator``).
+
+        Returns:
+        -------
+            Fitted :class:`~cellpin.training.CellPinTrainer`.
+
+        Raises:
+        ------
+            KeyError: If ``emb_key`` is not found in ``dataset.adata.obsm``.
+
+        Example::
+
+            sc_dataset, st_dataset = cellpin.pp.setup_data(sc_adata, st_adata)
+            model = cellpin.CellPin(sc_dataset)
+            model.match_emb(sc_dataset, emb_key="X_scVI")
+            emb = model.embed_atlas(st_dataloader)  # (n_cells, emb_dim)
+        """
+        if emb_key not in dataset.adata.obsm:
+            raise KeyError(
+                f"Embedding key '{emb_key}' not found in dataset.adata.obsm. "
+                f"Available keys: {list(dataset.adata.obsm.keys())}"
+            )
+
+        emb = np.asarray(dataset.adata.obsm[emb_key], dtype=np.float32)
+        emb_dim = emb.shape[1]
+
+        # Build the atlas-matching network (output dim = embedding dim).
+        self.atlas_net = AtlasMatchNet(
+            n_panel=int(self.n_panel_genes),
+            emb_dim=int(emb_dim),
+            n_hidden=int(getattr(self, "atlas_hidden", 256)),
+            n_blocks=int(getattr(self, "atlas_blocks", 4)),
+            expansion=float(getattr(self, "atlas_expansion", 2.0)),
+            dropout=float(getattr(self, "atlas_dropout", 0.1)),
+            drop_path_rate=float(getattr(self, "atlas_drop_path_rate", 0.1)),
+            layer_scale_init=float(getattr(self, "layer_scale_init", 1e-3)),
+            log_input=bool(getattr(self, "log_variational", True)),
+        )
+        setattr(self, "n_latent", emb_dim)
+        self.hparams["n_latent"] = emb_dim
+
+        # --- Input statistics: per-gene mean/std on log1p panel counts. ---
+        X = dataset.X
+        panel_idx = np.asarray(dataset.panel_idx, dtype=np.int64)
+        Xp = X[:, panel_idx]
+        Xp = Xp.toarray() if hasattr(Xp, "toarray") else np.asarray(Xp)
+        logp = np.log1p(Xp.astype(np.float32)) if self.atlas_net.log_input else Xp.astype(np.float32)
+        self.atlas_net.set_input_stats(
+            torch.from_numpy(logp.mean(axis=0)), torch.from_numpy(logp.std(axis=0))
+        )
+
+        # --- Target statistics: per-dimension atlas embedding mean/std. ---
+        self.atlas_net.set_target_stats(
+            torch.from_numpy(emb.mean(axis=0)), torch.from_numpy(emb.std(axis=0))
+        )
+
+        # Store atlas embedding on CPU; slices are moved to the model device per batch.
+        self._atlas_emb = torch.tensor(emb, dtype=torch.float32)
+
+        # Stage and trainability: only the atlas network trains; VAE is unused.
+        self._training_stage = "emb_match"
+        self._pretrain_completed = False
+        self._freeze_pretrained_in_main = False
+        self._decoder_warm_unfreeze_epoch = -1
+        self._decoder_unfrozen = True
+
+        for p in self.vae.parameters():
+            p.requires_grad = False
+        for p in self.atlas_net.parameters():
+            p.requires_grad = True
+
+        max_epochs = trainer_kwargs.pop("max_epochs", train_epochs)
+        self.hparams["max_epochs"] = max_epochs
+
+        indexed_dataset = _IndexedDataset(dataset)
+        train_loader, val_loader = build_data_loaders(
+            indexed_dataset,
+            train_size=train_size,
+            batch_size=trainer_kwargs.pop("batch_size", batch_size),
+            num_workers=trainer_kwargs.pop("num_workers", 4),
+        )
+
+        # Weight EMA (smooths the regression plateau); disable with atlas_ema_decay=0.
+        ema_decay = float(getattr(self, "atlas_ema_decay", 0.999))
+        callbacks = list(custom_callbacks) if custom_callbacks else []
+        if ema_decay > 0.0:
+            callbacks.append(EMACallback(decay=ema_decay))
+
+        trainer = CellPinTrainer(
+            max_epochs=max_epochs,
+            output_dir=f"{output_dir}/match_emb",
+            gradient_clip_val=gradient_clip_val,
+            early_stopping_patience=early_stopping_patience,
+            enable_checkpointing=save_checkpoints,
+            custom_callbacks=callbacks,
+            **trainer_kwargs,
+        )
+        trainer.fit(self, train_loader, val_loader)
+        self._train_output_dir = Path(trainer.logger[1].log_dir)
+
+        best = trainer.best_model_path
+        if best:
+            ckpt = torch.load(best, map_location="cpu")
+            self.load_state_dict(ckpt["state_dict"])
+            print(f"  [match_emb] Restored best checkpoint (epoch {ckpt.get('epoch', '?')}): {Path(best).name}")
+
+        return trainer
+
+    @torch.no_grad()
+    def embed_atlas(self, dataloader: torch.utils.data.DataLoader) -> np.ndarray:
+        """Predict atlas-space embeddings from a panel with :class:`AtlasMatchNet`.
+
+        Companion to :meth:`match_emb`.  Runs the trained atlas network over the
+        panel of each batch and returns embeddings in the original atlas space
+        (target de-standardisation is applied internally).  No augmentation is
+        used; no counts are imputed.
+
+        Args:
+            dataloader: DataLoader over an :class:`~cellpin.dataset.scAnnDataset`
+                or :class:`~cellpin.dataset.stAnnDataset` whose panel matches the
+                training panel order.
+
+        Returns:
+        -------
+            Float32 array ``(n_cells, emb_dim)``.
+
+        Raises:
+        ------
+            RuntimeError: If :meth:`match_emb` has not been called.
+        """
+        if self.atlas_net is None:
+            raise RuntimeError("call match_emb() before embed_atlas().")
+
+        self.eval()
+        if torch.cuda.is_available() and self.device.type == "cpu":
+            self.cuda()
+
+        embs = []
+        for batch in track(dataloader, description="Embedding cells (atlas)"):
+            x_panel = self._panel_from_batch(batch).to(self.device)
+            embs.append(self.atlas_net.predict(x_panel).cpu())
+        return torch.cat(embs, dim=0).numpy()
+
     @torch.no_grad()
     def impute(
         self,
@@ -1135,6 +1475,7 @@ class CellPin(pl.LightningModule):
         area_key: str | None = None,
         nb_count_samples: int = 100,
         return_int: bool = False,
+        return_sparse: bool = True,
         table_key: str = "table",
     ) -> ad.AnnData:
         """Impute with MC averaging and optional count-space normalisation.
@@ -1168,6 +1509,9 @@ class CellPin(pl.LightningModule):
                 ``log1p(norm(E[X])) > E[log1p(norm(X))]``; sampling inside the
                 transform corrects this bias.  More samples → lower variance.
             return_int: If ``True``, round ``X`` to integer counts (``int32``).
+            return_sparse: If ``True`` (default), store ``X``, ``layers['imputed']``,
+                and ``layers['imputed_norm']`` as :class:`scipy.sparse.csr_matrix`.
+                Set to ``False`` to keep dense numpy arrays.
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
 
@@ -1176,6 +1520,8 @@ class CellPin(pl.LightningModule):
             :class:`anndata.AnnData` with ``X`` = imputed (float or int) counts,
             ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']`` = copy of
             ``X``, and optionally ``layers['imputed_norm']``.
+            ``var['is_measured']`` marks genes present in ``obs_adata`` (all ``True``
+            when ``obs_adata`` is ``None``).
             If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
             with the result stored in ``sdata.tables[table_key]``.
 
@@ -1185,6 +1531,8 @@ class CellPin(pl.LightningModule):
                 ``area_key`` is specified but not found in ``adata.obs``, or if
                 any cell area is ≤ 0.
         """
+        import scipy.sparse as sp
+
         obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
 
         embeddings, counts, log_library = self.embed_and_impute(
@@ -1200,8 +1548,11 @@ class CellPin(pl.LightningModule):
         if return_int:
             counts = np.round(counts, decimals=0).astype(np.int32)
 
-        adata_out = self._build_output_anndata(counts, embeddings, obs_adata)
-        adata_out.layers["imputed"] = counts.copy()
+        adata_out = self._build_output_anndata(counts, embeddings, obs_adata, return_sparse=return_sparse)
+
+        imputed = sp.csr_matrix(counts) if return_sparse else counts.copy()
+        adata_out.X = imputed
+        adata_out.layers["imputed"] = imputed
 
         if return_norm:
             # MC estimate of E[log1p(norm(X))] where X ~ NB(mu, theta).
@@ -1240,7 +1591,8 @@ class CellPin(pl.LightningModule):
                     normed = draw * (norm_target_sum / lib)
                 log1p_acc += np.log1p(normed)
 
-            adata_out.layers["imputed_norm"] = (log1p_acc / K).astype(np.float32)
+            norm_layer = (log1p_acc / K).astype(np.float32)
+            adata_out.layers["imputed_norm"] = sp.csr_matrix(norm_layer) if return_sparse else norm_layer
 
         if sdata is not None:
             sdata.tables[table_key] = adata_out
