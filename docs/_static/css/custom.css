@@ -2,3 +2,9 @@
 div.cell_output table.dataframe {
     font-size: 0.8em;
 }
+
+/* Remove theme-injected background from transparent PNGs */
+img.no-bg {
+    background: transparent !important;
+    box-shadow: none !important;
+}

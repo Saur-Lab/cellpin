@@ -3,6 +3,7 @@
 ```{image} _static/cellpin_bestpractices.png
 :align: right
 :width: 220px
+:class: no-bg
 ```
 
 A few recommendations to get the most out of cellpin before you dive in.
