@@ -49,6 +49,7 @@ Putze P*, Lucarelli D*, Wellappili D, Bahrami M, Luecken MD, Theis FJ, Saur D. C
 :maxdepth: 1
 
 api.md
+best_practices.md
 changelog.md
 contributing.md
 
