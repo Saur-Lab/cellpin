@@ -28,11 +28,15 @@ class TLAccessor:
         k: int = 15,
         test_size: float = 0.2,
         random_state: int = 42,
+        emb_key: str | None = None,
     ) -> tuple[float, ad.AnnData]:
-        """Transfer cell type labels from scRNA to spatial data via kNN in cellpin latent space.
+        """Transfer cell type labels from scRNA to spatial data via kNN in embedding space.
 
-        If ``X_cellpin`` is absent from either adata, ``impute()`` is run automatically
-        with default settings and the embedding is stored back into the adata.
+        Works with both the standard VAE path (``model.fit()``) and the atlas-matching
+        path (``model.match_emb()``).  ``emb_key`` is auto-detected when omitted:
+        ``"X_cellpin_match"`` after ``match_emb()``, ``"X_cellpin"`` otherwise.
+
+        If the chosen embedding is absent from either adata it is computed automatically.
 
         Args:
             sc_adata: Single-cell AnnData with ground-truth cell type labels.
@@ -45,6 +49,7 @@ class TLAccessor:
             k: Number of nearest neighbours (default 15).
             test_size: Fraction of scRNA cells held out for evaluation (default 0.2).
             random_state: Random seed for the train/test split (default 42).
+            emb_key: Embedding key to use (auto-detected when ``None``).
 
         Returns:
             Tuple of ``(test_accuracy, sp_adata)``.
@@ -58,6 +63,7 @@ class TLAccessor:
             k=k,
             test_size=test_size,
             random_state=random_state,
+            emb_key=emb_key,
         )
 
 

@@ -46,6 +46,30 @@ def per_dim_r2(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return 1.0 - ss_res / ss_tot
 
 
+def mmd_loss(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+    """Maximum Mean Discrepancy with a multi-scale Gaussian kernel.
+
+    Measures the distance between the distributions of ``x`` and ``y`` without
+    requiring any per-sample correspondence.  Uses three bandwidths
+    (0.5, 1.0, 2.0) suited to standardised embedding space (unit variance per
+    dimension).
+
+    Only gradients w.r.t. ``x`` are meaningful when ``y`` is detached — which
+    is the intended use in ``finetune_spatial``: push spatial predictions toward
+    the scRNA distribution without pulling the scRNA anchor off its targets.
+
+    Both tensors are ``(B, D)``.  Returns a scalar.
+    """
+    dxx = torch.cdist(x, x).pow(2)
+    dyy = torch.cdist(y, y).pow(2)
+    dxy = torch.cdist(x, y).pow(2)
+    loss = x.new_zeros(1).squeeze()
+    for bw in (0.5, 1.0, 2.0):
+        s = 2.0 * bw ** 2
+        loss = loss + torch.exp(-dxx / s).mean() + torch.exp(-dyy / s).mean() - 2.0 * torch.exp(-dxy / s).mean()
+    return loss / 3.0
+
+
 def dist_match_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     """Differentiable surrogate for kNN-overlap: match pairwise distances.
 
@@ -111,6 +135,29 @@ def knn_overlap(
 # ---------------------------------------------------------------------------
 # Exponential moving average of weights
 # ---------------------------------------------------------------------------
+
+
+class AugmentationCurriculumCallback(pl.Callback):
+    """Linearly ramp augmentation strength from 0 → 1 after a warmup phase.
+
+    Sets ``pl_module._aug_strength`` at the start of each training epoch.
+    During the first ``warmup_frac`` of epochs the value is 0 (no augmentation);
+    it then increases linearly to 1 over the remaining epochs.  Both
+    ``_poisson_resample_panel`` and ``_mixup_panel`` read this attribute so no
+    other wiring is needed.
+
+    Args:
+        warmup_frac: Fraction of total epochs to train with zero augmentation.
+    """
+
+    def __init__(self, warmup_frac: float = 0.25) -> None:
+        super().__init__()
+        self.warmup_frac = warmup_frac
+
+    def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        progress = trainer.current_epoch / max(1, trainer.max_epochs)
+        strength = max(0.0, (progress - self.warmup_frac) / (1.0 - self.warmup_frac))
+        pl_module._aug_strength = float(min(1.0, strength))
 
 
 class EMACallback(pl.Callback):

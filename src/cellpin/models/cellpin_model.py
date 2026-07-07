@@ -43,15 +43,38 @@ from cellpin.models.utils import (
 )
 from cellpin.models.atlas_match import (
     AtlasMatchNet,
+    AugmentationCurriculumCallback,
     EMACallback,
     dist_match_loss,
     knn_overlap,
+    mmd_loss,
     per_dim_r2,
 )
 from cellpin.models.vae import CellPinVAE
 from cellpin.pl import PlotAccessor
 from cellpin.tl import TLAccessor
 from cellpin.training import CellPinTrainer
+
+
+# Default hyper-parameters applied when match_emb() is called without an
+# explicit config for these keys. Any value already set via CellPin(config=...)
+# takes precedence — these only fill gaps.
+_MATCH_EMB_DEFAULTS: dict[str, float | int] = {
+    "atlas_hidden": 1024,
+    "atlas_blocks": 8,
+    "atlas_expansion": 2.0,
+    "atlas_dropout": 0.1,
+    "atlas_drop_path_rate": 0.1,
+    "poisson_resample_rate": 0.4,
+    "spatial_resample_rate": 0.85,
+    "panel_mixup_alpha": 0.3,
+    "atlas_distill_weight": 1.0,
+    "atlas_consistency_weight": 1.0,
+    "atlas_cos_weight": 0.1,
+    "atlas_aug_warmup_frac": 0.10,
+    "atlas_lr_warmup_epochs": 5,
+    "atlas_ema_decay": 0.999,
+}
 
 
 def soft_nn_loss(
@@ -87,6 +110,65 @@ class _IndexedDataset(torch.utils.data.Dataset):
         out = self._base[idx]
         out["cell_idx"] = torch.tensor(idx, dtype=torch.long)
         return out
+
+
+class _FinetuneScDataset(torch.utils.data.Dataset):
+    """scRNA side of ``finetune_spatial``: strips to panel_expr + indices only.
+
+    Returns a uniform dict compatible with the spatial side so that both can
+    be merged into a single ``ConcatDataset`` with one collate function.
+    """
+
+    def __init__(self, base: torch.utils.data.Dataset) -> None:
+        self._base = base
+
+    def __len__(self) -> int:
+        return len(self._base)
+
+    def __getitem__(self, idx: int) -> dict:
+        item = self._base[idx]
+        panel = item.get("panel_expr", item.get("full_expr"))
+        return {
+            "panel_expr": panel,
+            "cell_idx": torch.tensor(idx, dtype=torch.long),
+            "domain": torch.tensor(0, dtype=torch.long),
+            "type_idx": torch.tensor(-1, dtype=torch.long),
+        }
+
+
+class _LabeledSpatialDataset(torch.utils.data.Dataset):
+    """Spatial side of ``finetune_spatial``: strips to panel_expr + domain flag.
+
+    ``type_indices`` is an optional int tensor ``(n_sp_cells,)`` mapping each
+    spatial cell to a row in ``_type_centroids``.  Pass ``None`` to fall back
+    to MMD-based alignment.
+    """
+
+    def __init__(
+        self,
+        base: torch.utils.data.Dataset,
+        type_indices: torch.Tensor | None = None,
+    ) -> None:
+        self._base = base
+        self._type_indices = type_indices
+
+    def __len__(self) -> int:
+        return len(self._base)
+
+    def __getitem__(self, idx: int) -> dict:
+        item = self._base[idx]
+        panel = item.get("panel_expr", item.get("full_expr"))
+        type_idx = (
+            self._type_indices[idx]
+            if self._type_indices is not None
+            else torch.tensor(-1, dtype=torch.long)
+        )
+        return {
+            "panel_expr": panel,
+            "cell_idx": torch.tensor(-1, dtype=torch.long),
+            "domain": torch.tensor(1, dtype=torch.long),
+            "type_idx": type_idx,
+        }
 
 
 class CellPin(pl.LightningModule):
@@ -210,6 +292,9 @@ class CellPin(pl.LightningModule):
 
         self._training_stage: Literal["pretrain", "main", "emb_match"] = "main"
         self._atlas_emb: torch.Tensor | None = None  # set by match_emb()
+        self._atlas_emb_std: torch.Tensor | None = None  # precomputed standardised targets
+        self._type_centroids: torch.Tensor | None = None  # set by finetune_spatial()
+        self._aug_strength: float = 1.0  # overridden per-epoch by AugmentationCurriculumCallback
         self.atlas_net: AtlasMatchNet | None = None  # built by match_emb()
         self._pretrain_completed: bool = False
         self._freeze_pretrained_in_main: bool = True
@@ -343,7 +428,7 @@ class CellPin(pl.LightningModule):
 
         Config key: ``panel_mixup_alpha`` (float, default ``0.0`` = disabled).
         """
-        max_alpha = float(getattr(self, "panel_mixup_alpha", 0.0))
+        max_alpha = float(getattr(self, "panel_mixup_alpha", 0.0)) * self._aug_strength
         if not self.training or max_alpha <= 0.0:
             return x_panel
 
@@ -367,10 +452,33 @@ class CellPin(pl.LightningModule):
         default ``0.0`` = disabled).  A value of ``0.4`` draws capture
         efficiency uniformly from ``[0.6, 1.0]``.
         """
-        rate = float(getattr(self, "poisson_resample_rate", 0.0))
+        rate = float(getattr(self, "poisson_resample_rate", 0.0)) * self._aug_strength
         if not self.training or rate <= 0.0:
             return x_panel
         eff = 1.0 - torch.rand(1, device=x_panel.device) * rate
+        return torch.poisson(x_panel * eff)
+
+    def _spatial_resample_panel(self, x_panel: torch.Tensor) -> torch.Tensor:
+        """Per-cell Poisson downsampling for the atlas-matching stage only.
+
+        Unlike ``_poisson_resample_panel`` (which draws one efficiency for the
+        whole batch), this draws an independent capture efficiency for every
+        cell.  Spatial platforms vary widely in per-cell capture — some cells
+        are nearly fully captured, others are very sparse — so cell-level
+        variance in efficiency is the more realistic simulation.  Use a high
+        ``spatial_resample_rate`` (e.g. 0.85) to cover the full range down to
+        ~15% efficiency typical of Xenium vs scRNA.
+
+        Only called from ``compute_losses_emb``; ``fit()`` is unaffected.
+
+        Config key: ``spatial_resample_rate`` (float in ``[0, 1]``,
+        default ``0.0`` = disabled).
+        """
+        rate = float(getattr(self, "spatial_resample_rate", 0.0)) * self._aug_strength
+        if not self.training or rate <= 0.0:
+            return x_panel
+        B = x_panel.size(0)
+        eff = 1.0 - torch.rand(B, 1, device=x_panel.device) * rate
         return torch.poisson(x_panel * eff)
 
     @staticmethod
@@ -661,13 +769,19 @@ class CellPin(pl.LightningModule):
         x_panel = batch["panel_expr"]
         cell_idx = batch["cell_idx"].cpu()
 
-        # Atlas target slice — index on CPU, move to device, standardise (no grad).
-        z_atlas = self._atlas_emb[cell_idx].to(x_panel.device).detach()
-        z_star = self.atlas_net.standardize_target(z_atlas)
+        # Precomputed standardised targets — avoids per-batch subtract/divide on GPU.
+        z_star = self._atlas_emb_std[cell_idx].to(x_panel.device)
 
         # Two independently augmented views → predicted (standardised) embeddings.
-        v1 = self.atlas_net(self._mixup_panel(self._poisson_resample_panel(x_panel)))
-        v2 = self.atlas_net(self._mixup_panel(self._poisson_resample_panel(x_panel)))
+        # Augmentation order: global count reduction (Poisson) → per-cell
+        # spatial variance (_spatial_resample_panel) → contamination (mixup).
+        def _augment(x: torch.Tensor) -> torch.Tensor:
+            return self._mixup_panel(
+                self._spatial_resample_panel(self._poisson_resample_panel(x))
+            )
+
+        v1 = self.atlas_net(_augment(x_panel))
+        v2 = self.atlas_net(_augment(x_panel))
 
         distill_loss = 0.5 * (F.mse_loss(v1, z_star) + F.mse_loss(v2, z_star))
         consistency_loss = F.mse_loss(v1, v2)
@@ -676,12 +790,17 @@ class CellPin(pl.LightningModule):
         )
 
         lam_distill = float(getattr(self, "atlas_distill_weight", 1.0))
-        lam_consistency = float(getattr(self, "atlas_consistency_weight", 1.0))
-        lam_cos = float(getattr(self, "atlas_cos_weight", 0.1))
+        # Consistency and cosine losses ramp with augmentation strength so that
+        # the network focuses on distill_loss during the no-augmentation warmup.
+        lam_consistency = float(getattr(self, "atlas_consistency_weight", 1.0)) * self._aug_strength
+        lam_cos = float(getattr(self, "atlas_cos_weight", 0.1)) * self._aug_strength
         # Opt-in pairwise-distance term: differentiable surrogate for kNN-overlap.
-        # Always computed for logging; contributes to the total only when weighted.
+        # Skipped entirely when weight is 0 to avoid the O(B²) pdist cost.
         lam_dist = float(getattr(self, "atlas_dist_weight", 0.0))
-        dist_loss = 0.5 * (dist_match_loss(v1, z_star) + dist_match_loss(v2, z_star))
+        if lam_dist > 0.0:
+            dist_loss = 0.5 * (dist_match_loss(v1, z_star) + dist_match_loss(v2, z_star))
+        else:
+            dist_loss = torch.zeros(1, device=v1.device).squeeze()
 
         total = (
             lam_distill * distill_loss
@@ -702,6 +821,72 @@ class CellPin(pl.LightningModule):
             "_pred": v1.detach(),
             "_target": z_star,
         }
+        return out
+
+    def compute_losses_finetune_spatial(self, batch: dict[str, torch.Tensor]) -> dict:
+        """Mixed-batch loss for the spatial fine-tuning stage.
+
+        Each batch contains both scRNA cells (``domain==0``) and spatial cells
+        (``domain==1``).
+
+        * **scRNA side** — predictions are anchored to the fixed precomputed
+          atlas targets (``_atlas_emb_std``).  This keeps the network from
+          drifting away from the atlas geometry.
+
+        * **Spatial side** — MMD aligns the distribution of spatial predictions
+          to the distribution of scRNA predictions within the same batch.
+          ``sc_pred`` is detached so MMD gradients only update the spatial path,
+          not the already-anchored scRNA path.  No labels are required.
+        """
+        if self._atlas_emb_std is None:
+            raise RuntimeError("call match_emb() before finetune_spatial().")
+
+        x_panel = batch["panel_expr"]
+        domain = batch["domain"]
+        sc_mask = domain == 0
+        sp_mask = domain == 1
+
+        total = torch.zeros(1, device=x_panel.device).squeeze()
+        out: dict[str, torch.Tensor] = {}
+
+        # --- scRNA anchor: clean forward pass, per-cell atlas targets (fixed) ---
+        sc_pred = None
+        if sc_mask.any():
+            xsc = x_panel[sc_mask]
+            cell_idx = batch["cell_idx"][sc_mask].cpu()
+            z_star = self._atlas_emb_std[cell_idx].to(xsc.device)
+            sc_pred = self.atlas_net(xsc)
+            distill_loss = F.mse_loss(sc_pred, z_star)
+            lam_distill = float(getattr(self, "atlas_distill_weight", 1.0))
+            total = total + lam_distill * distill_loss
+            out["distill_loss"] = distill_loss
+
+        # --- Spatial alignment ---
+        if sp_mask.any():
+            xsp = x_panel[sp_mask]
+            sp_pred = self.atlas_net(self._spatial_resample_panel(self._mixup_panel(xsp)))
+
+            if self._type_centroids is not None and "type_idx" in batch:
+                # Per-type centroid loss: pull each spatial cell toward the
+                # atlas centroid of its assigned cell type.  Cells with unknown
+                # type (type_idx == -1) are skipped.
+                type_idx = batch["type_idx"][sp_mask]
+                valid = type_idx >= 0
+                if valid.any():
+                    centroids = self._type_centroids.to(sp_pred.device)
+                    target = centroids[type_idx[valid]]
+                    centroid_loss = F.mse_loss(sp_pred[valid], target.detach())
+                    lam = float(getattr(self, "atlas_centroid_weight", 1.0))
+                    total = total + lam * centroid_loss
+                    out["centroid_loss"] = centroid_loss
+            elif sc_pred is not None:
+                # Fallback to global MMD when no type labels are available.
+                mmd = mmd_loss(sp_pred, sc_pred.detach())
+                lam_mmd = float(getattr(self, "atlas_mmd_weight", 1.0))
+                total = total + lam_mmd * mmd
+                out["mmd_loss"] = mmd
+
+        out["loss"] = total
         return out
 
     # ------------------------------------------------------------------
@@ -726,6 +911,12 @@ class CellPin(pl.LightningModule):
             losses = self.compute_pretrain_losses(batch)
         elif self._training_stage == "emb_match":
             losses = self.compute_losses_emb(batch)
+        elif self._training_stage == "finetune_spatial":
+            # Train on mixed sc+sp batches; val uses scRNA distill to monitor anchor.
+            if prefix == "train":
+                losses = self.compute_losses_finetune_spatial(batch)
+            else:
+                losses = self.compute_losses_emb(batch)
         else:
             losses = self.compute_losses(batch)
 
@@ -742,7 +933,7 @@ class CellPin(pl.LightningModule):
                 self.log(f"{prefix}_{name}", val, **log_kw)
 
         # Accumulate clean val predictions/targets for epoch-level atlas metrics.
-        if prefix == "val" and self._training_stage == "emb_match" and "_pred" in losses:
+        if prefix == "val" and self._training_stage in ("emb_match", "finetune_spatial") and "_pred" in losses:
             self._val_pred_buf.append(losses["_pred"].detach().cpu())
             self._val_target_buf.append(losses["_target"].detach().cpu())
 
@@ -750,19 +941,21 @@ class CellPin(pl.LightningModule):
 
     def on_validation_epoch_start(self) -> None:
         """Reset buffers that collect atlas predictions/targets for metrics."""
-        if self._training_stage == "emb_match":
+        if self._training_stage in ("emb_match", "finetune_spatial"):
             self._val_pred_buf: list[torch.Tensor] = []
             self._val_target_buf: list[torch.Tensor] = []
 
     def on_validation_epoch_end(self) -> None:
-        """Log per-dim R² and kNN-overlap for the atlas-matching stage.
+        """Log per-dim R² and kNN-overlap for atlas-matching and fine-tuning stages.
 
         These are the metrics that actually mean "reproduce the embedding":
         ``val_r2_mean``/``val_r2_min`` measure pointwise coordinate fit in
         standardised target space, while ``val_knn_overlap`` measures whether the
         atlas neighbour structure is preserved (what the UMAP overlap shows).
+        During ``finetune_spatial``, validation runs on scRNA cells so these
+        metrics monitor that the anchor hasn't drifted.
         """
-        if self._training_stage != "emb_match" or not getattr(self, "_val_pred_buf", None):
+        if self._training_stage not in ("emb_match", "finetune_spatial") or not getattr(self, "_val_pred_buf", None):
             return
         pred = torch.cat(self._val_pred_buf)
         target = torch.cat(self._val_target_buf)
@@ -792,16 +985,34 @@ class CellPin(pl.LightningModule):
             params = list(self.parameters())
         else:
             params = [p for p in self.parameters() if p.requires_grad]
+        lr = float(self.hparams.get("lr", 1e-3))
+        max_epochs = int(self.hparams.get("max_epochs", 100))
         optimizer = torch.optim.AdamW(
             params,
-            lr=float(self.hparams.get("lr", 1e-3)),
+            lr=lr,
             weight_decay=float(self.hparams.get("weight_decay", 1e-4)),
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=int(self.hparams.get("max_epochs", 100)),
-            eta_min=float(self.hparams.get("lr", 1e-3)) * 0.1,
-        )
+
+        if self._training_stage == "emb_match":
+            # Linear warmup then cosine decay — reduces instability from large
+            # gradients before the network settles into the embedding geometry.
+            warmup_epochs = min(
+                int(getattr(self, "atlas_lr_warmup_epochs", 5)), max_epochs - 1
+            )
+            warmup_sched = torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.1, total_iters=warmup_epochs
+            )
+            cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(1, max_epochs - warmup_epochs), eta_min=lr * 0.1
+            )
+            scheduler = torch.optim.lr_scheduler.SequentialLR(
+                optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[warmup_epochs]
+            )
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max_epochs, eta_min=lr * 0.1
+            )
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -1343,6 +1554,11 @@ class CellPin(pl.LightningModule):
                 f"Available keys: {list(dataset.adata.obsm.keys())}"
             )
 
+        # Apply match_emb defaults for any param not set via config.
+        for _k, _v in _MATCH_EMB_DEFAULTS.items():
+            if not hasattr(self, _k):
+                setattr(self, _k, _v)
+
         emb = np.asarray(dataset.adata.obsm[emb_key], dtype=np.float32)
         emb_dim = emb.shape[1]
 
@@ -1372,12 +1588,17 @@ class CellPin(pl.LightningModule):
         )
 
         # --- Target statistics: per-dimension atlas embedding mean/std. ---
-        self.atlas_net.set_target_stats(
-            torch.from_numpy(emb.mean(axis=0)), torch.from_numpy(emb.std(axis=0))
-        )
+        _emb_mu = emb.mean(axis=0)
+        _emb_sigma = emb.std(axis=0).clip(1e-6)
+        self.atlas_net.set_target_stats(torch.from_numpy(_emb_mu), torch.from_numpy(_emb_sigma))
 
         # Store atlas embedding on CPU; slices are moved to the model device per batch.
         self._atlas_emb = torch.tensor(emb, dtype=torch.float32)
+        # Precompute standardised targets once so compute_losses_emb avoids
+        # per-batch subtract/divide on the GPU.
+        self._atlas_emb_std = torch.tensor(
+            (emb - _emb_mu) / _emb_sigma, dtype=torch.float32
+        )
 
         # Stage and trainability: only the atlas network trains; VAE is unused.
         self._training_stage = "emb_match"
@@ -1407,6 +1628,11 @@ class CellPin(pl.LightningModule):
         callbacks = list(custom_callbacks) if custom_callbacks else []
         if ema_decay > 0.0:
             callbacks.append(EMACallback(decay=ema_decay))
+        # Augmentation curriculum: no augmentation for the first warmup fraction of
+        # epochs, then linearly ramp to full strength. Disable with atlas_aug_warmup_frac=0.
+        aug_warmup_frac = float(getattr(self, "atlas_aug_warmup_frac", 0.25))
+        if aug_warmup_frac > 0.0:
+            callbacks.append(AugmentationCurriculumCallback(warmup_frac=aug_warmup_frac))
 
         trainer = CellPinTrainer(
             max_epochs=max_epochs,
@@ -1425,6 +1651,148 @@ class CellPin(pl.LightningModule):
             ckpt = torch.load(best, map_location="cpu")
             self.load_state_dict(ckpt["state_dict"])
             print(f"  [match_emb] Restored best checkpoint (epoch {ckpt.get('epoch', '?')}): {Path(best).name}")
+
+        return trainer
+
+    def finetune_spatial(
+        self,
+        sc_dataset: scAnnDataset,
+        sp_dataset: torch.utils.data.Dataset,
+        sc_type_labels: np.ndarray | None = None,
+        sp_type_labels: np.ndarray | None = None,
+        train_epochs: int = 30,
+        batch_size: int = 256,
+        gradient_clip_val: float = 0.5,
+        early_stopping_patience: int = 10,
+        train_size: float = 0.8,
+        save_checkpoints: bool = False,
+        output_dir: str = "./cellpin_output",
+        custom_callbacks: list | None = None,
+        **trainer_kwargs,
+    ):
+        """Fine-tune the atlas network to close the scRNA → spatial domain gap.
+
+        Co-embeds scRNA and spatial cells in each training batch:
+
+        * **scRNA cells** are passed through the network with no augmentation
+          and anchored to their fixed precomputed atlas targets
+          (``_atlas_emb_std``), preventing the network from drifting.
+        * **Spatial cells** are passed through with spatial augmentation and
+          pulled toward the centroid of their pseudo-assigned cell type in atlas
+          space.  Centroids are computed from the fixed scRNA atlas embeddings,
+          so the spatial embeddings are pushed toward the correct cluster geometry
+          without shuffling random cells around.  Falls back to global MMD when
+          no type labels are provided.
+
+        Validation is run on the scRNA held-out split so that ``val_r2_mean``
+        and ``val_knn_overlap`` monitor anchor quality throughout fine-tuning.
+
+        Args:
+            sc_dataset: The same scRNA dataset used for ``match_emb``.
+            sp_dataset: Spatial dataset (``stAnnDataset``) whose panel matches
+                the training panel.
+            sc_type_labels: String cell-type labels aligned with ``sc_dataset``
+                rows (same order).  Used to compute per-type atlas centroids.
+            sp_type_labels: String cell-type labels aligned with ``sp_dataset``
+                rows (e.g. from ``label_transfer``).  Each spatial cell is pulled
+                toward the centroid of its assigned type.
+            train_epochs: Maximum fine-tuning epochs.
+            batch_size: Mini-batch size (sc + sp cells are mixed in each batch).
+            gradient_clip_val: Gradient clipping value.
+            early_stopping_patience: Patience on ``val_knn_overlap``.
+            train_size: Fraction of scRNA cells used for the anchor val split.
+            save_checkpoints: Save checkpoints to ``output_dir``.
+            output_dir: Root directory for logs and checkpoints.
+            custom_callbacks: Extra PyTorch-Lightning callbacks.
+            **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
+        """
+        if self.atlas_net is None or self._atlas_emb_std is None:
+            raise RuntimeError("call match_emb() before finetune_spatial().")
+
+        # --- Compute per-type centroids in standardised atlas space -----------
+        sp_type_indices: torch.Tensor | None = None
+        if sc_type_labels is not None and sp_type_labels is not None:
+            all_types = sorted(set(sc_type_labels) | set(sp_type_labels))
+            type_to_idx = {t: i for i, t in enumerate(all_types)}
+            n_types = len(all_types)
+            emb_dim = self._atlas_emb_std.shape[1]
+
+            # Accumulate per-type centroid from the fixed scRNA atlas embeddings.
+            centroids = torch.zeros(n_types, emb_dim)
+            counts = torch.zeros(n_types)
+            for i, t in enumerate(sc_type_labels):
+                tid = type_to_idx.get(t, -1)
+                if tid >= 0:
+                    centroids[tid] += self._atlas_emb_std[i]
+                    counts[tid] += 1
+            counts = counts.clamp_min(1.0)
+            self._type_centroids = centroids / counts.unsqueeze(1)
+
+            sp_type_indices = torch.tensor(
+                [type_to_idx.get(str(t), -1) for t in sp_type_labels],
+                dtype=torch.long,
+            )
+            print(
+                f"  [finetune_spatial] Using per-type centroid loss "
+                f"({n_types} types, {(sp_type_indices >= 0).sum().item()} / "
+                f"{len(sp_type_indices)} spatial cells matched)"
+            )
+        else:
+            self._type_centroids = None
+            print("  [finetune_spatial] No type labels provided — falling back to MMD.")
+
+        # --- Build mixed dataset: scRNA (anchor) + spatial -------------------
+        sc_ft = _FinetuneScDataset(sc_dataset)
+        sp_ft = _LabeledSpatialDataset(sp_dataset, type_indices=sp_type_indices)
+        mixed_dataset = torch.utils.data.ConcatDataset([sc_ft, sp_ft])
+
+        # scRNA val-only split to monitor anchor quality
+        sc_indexed = _IndexedDataset(sc_dataset)
+        _, sc_val_loader = build_data_loaders(
+            sc_indexed,
+            train_size=train_size,
+            batch_size=trainer_kwargs.pop("batch_size", batch_size),
+            num_workers=trainer_kwargs.pop("num_workers", 4),
+        )
+        train_loader = torch.utils.data.DataLoader(
+            mixed_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=4,
+        )
+
+        # --- Stage setup ---
+        self._training_stage = "finetune_spatial"
+        for p in self.atlas_net.parameters():
+            p.requires_grad = True
+
+        max_epochs = trainer_kwargs.pop("max_epochs", train_epochs)
+        self.hparams["max_epochs"] = max_epochs
+
+        ema_decay = float(getattr(self, "atlas_ema_decay", 0.999))
+        callbacks = list(custom_callbacks) if custom_callbacks else []
+        if ema_decay > 0.0:
+            callbacks.append(EMACallback(decay=ema_decay))
+
+        trainer = CellPinTrainer(
+            max_epochs=max_epochs,
+            output_dir=f"{output_dir}/finetune_spatial",
+            gradient_clip_val=gradient_clip_val,
+            early_stopping_patience=early_stopping_patience,
+            enable_checkpointing=save_checkpoints,
+            custom_callbacks=callbacks,
+            checkpoint_monitor="val_knn_overlap",
+            early_stopping_mode="max",
+            **trainer_kwargs,
+        )
+        trainer.fit(self, train_loader, sc_val_loader)
+        self._train_output_dir = Path(trainer.logger[1].log_dir)
+
+        best = trainer.best_model_path
+        if best:
+            ckpt = torch.load(best, map_location="cpu")
+            self.load_state_dict(ckpt["state_dict"])
+            print(f"  [finetune_spatial] Restored best checkpoint (epoch {ckpt.get('epoch', '?')}): {Path(best).name}")
 
         return trainer
 

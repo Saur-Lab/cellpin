@@ -50,6 +50,9 @@ cellpin_output/
 *.log
 wandb/
 .coverage*
+logs/
+outputs/
+atlas_finetune_movie/
 
 # Docs
 /docs/generated/
