@@ -48,7 +48,21 @@
     :toctree: generated
 
     models.CellPin
-    models.CellPinVAE
+```
+
+### Model methods
+
+```{eval-rst}
+.. currentmodule:: cellpin.models
+
+.. autosummary::
+    :toctree: generated
+
+    CellPin.fit
+    CellPin.pretrain_model
+    CellPin.train_model
+    CellPin.impute
+    CellPin.get_cell_embedding
 ```
 
 ## Dataset

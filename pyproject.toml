@@ -4,7 +4,7 @@ requires = [ "hatchling" ]
 
 [project]
 name = "cellpin"
-version = "0.0.1"
+version = "0.1.1"
 description = "Cellpin: A Student–Teacher Variational Model for Spatial Transcriptomics Imputation and Encoding"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -27,7 +27,6 @@ classifiers = [
 dependencies = [
   "anndata",
   "session-info2",
-  "optuna>=4.7.0",
   "psutil>=7.1.3",
   "pytorch-lightning>=2.5.6",
   "pyyaml>=6.0",
@@ -35,9 +34,7 @@ dependencies = [
   "scanpy>=1.11.5",
   "session-info2",
   "tensorboard>=2.20.0",
-  "zarr<3",
   "torch>=2.9.1",
-  "spatialdata",
 ]
 
 optional-dependencies.spatial = [

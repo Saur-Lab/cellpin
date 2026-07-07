@@ -15,7 +15,7 @@ Additional features
 -------------------
 * KL annealing (linear warm-up over ``kl_warmup_epochs`` epochs).
 * Per-stage configurable loss weights.
-* ``get_cell_embedding``, ``embed_and_impute``, ``impute_to_anndata`` API.
+* ``get_cell_embedding``, ``embed_and_impute`` API.
 * ``fit()`` convenience wrapper: pretrain → train in one call.
 """
 
@@ -1360,61 +1360,6 @@ class CellPin(pl.LightningModule):
 
         return adata_out
 
-    @torch.no_grad()
-    def impute_to_anndata(
-        self,
-        dataloader: torch.utils.data.DataLoader,
-        obs_adata: ad.AnnData | None = None,
-        use_mean: bool = True,
-        mc_impute: bool = False,
-        mc_samples: int = 50,
-        mask_fraction: float = 0.2,
-        table_key: str = "table",
-    ) -> ad.AnnData:
-        """Impute full-gene expression and return as AnnData.
-
-        Args:
-            dataloader: DataLoader to run inference on.
-            obs_adata: Optional AnnData (or :class:`spatialdata.SpatialData`) whose
-                ``.obs`` is copied to the output. If SpatialData, the AnnData is read
-                from ``obs_adata.tables[table_key]`` and the result is returned as an
-                updated SpatialData object.  Must have the same number of observations.
-            use_mean: Use posterior mean for the latent (deterministic).
-                Ignored when ``mc_impute=True``.
-            mc_impute: Use MC averaging over ``mc_samples`` stochastic forward
-                passes (recommended; ~+0.01 mean Pearson over deterministic).
-            mc_samples: Number of MC samples (default 50).
-            mask_fraction: Fraction of panel genes randomly zeroed per MC pass
-                (default 0.2).
-            table_key: Table name to read/write when ``obs_adata`` is a SpatialData
-                object (default ``"table"``).
-
-        Returns:
-        -------
-            :class:`anndata.AnnData` with ``X`` = imputed counts,
-            ``obsm['X_cellpin']`` = embeddings, ``layers['imputed']``.
-            If ``obs_adata`` was a SpatialData object, returns the updated SpatialData
-            with the result stored in ``sdata.tables[table_key]``.
-
-        Raises:
-        ------
-            ValueError: If ``obs_adata`` has the wrong number of cells.
-        """
-        obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
-        embeddings, imputed_arr, _ = self.embed_and_impute(
-            dataloader,
-            use_mean=use_mean,
-            mc_impute=mc_impute,
-            mc_samples=mc_samples,
-            mask_fraction=mask_fraction,
-        )
-        adata_out = self._build_output_anndata(imputed_arr, embeddings, obs_adata)
-        adata_out.layers["imputed"] = adata_out.X.copy()
-        if sdata is not None:
-            sdata.tables[table_key] = adata_out
-            return sdata
-        return adata_out
-
     def fit(
         self,
         dataset: scAnnDataset,
@@ -1847,11 +1792,6 @@ class CellPin(pl.LightningModule):
         table_key: str = "table",
     ) -> ad.AnnData:
         """Impute with MC averaging and optional count-space normalisation.
-
-        More complete than :meth:`impute_to_anndata`: adds MC dropout, integer
-        rounding, and area-normalised log-normalised layers.  Use
-        :meth:`impute_to_anndata` when you only need embeddings + raw imputed
-        counts.
 
         Args:
             dataloader: DataLoader to run inference on.
