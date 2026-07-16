@@ -27,3 +27,7 @@ We strongly recommend setting `return_int=True` when retrieving reconstructed ex
 ## Accounting for batch effects
 
 If your spatial data or reference contains strong batch effects, make use of the `batch_key` parameter during setup. Passing a batch annotation allows cellpin to account for technical variation during training and typically leads to cleaner cell-type assignments and more accurate expression reconstruction.
+
+## Inspect label transfer results
+
+Label transfer results are only as good as the reference and the biological similarity between reference and query — as with any label-transfer method, accuracy can vary by dataset, tissue, and cell-type composition. We recommend always inspecting the assigned labels manually (e.g. against known marker genes or spatial context) before using them in downstream analyses, rather than taking them at face value.
