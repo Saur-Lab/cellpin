@@ -87,6 +87,47 @@ def dist_match_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return F.mse_loss(torch.pdist(pred), torch.pdist(target))
 
 
+def soft_centroid_loss(
+    pred: torch.Tensor,
+    centroids: torch.Tensor,
+    type_idx: torch.Tensor,
+    confidence: torch.Tensor | None = None,
+    temperature: float = 0.1,
+) -> torch.Tensor:
+    """Prototypical (soft nearest-centroid) pull toward per-type atlas centroids.
+
+    Unlike a direct ``MSE(pred, centroid)`` regression — which forces every
+    cell onto the *exact* coordinate of its assigned type's mean, regardless of
+    how confidently it belongs there — this treats the centroids as class
+    prototypes and asks only that ``pred`` be *closer* (in cosine similarity)
+    to its own type's centroid than to the others.  Gradients vanish once that
+    margin is comfortable, so cells already near the right neighbourhood stop
+    being pushed once separated from competing types, and pseudo-labels from
+    ``label_transfer`` are treated as soft evidence rather than a hard target.
+
+    Args:
+        pred: ``(B, D)`` spatial predictions (standardised atlas space).
+        centroids: ``(n_types, D)`` per-type atlas centroids.
+        type_idx: ``(B,)`` long tensor of assigned type indices (row into
+            ``centroids``); every entry must be a valid row (no ``-1``).
+        confidence: Optional ``(B,)`` per-cell weight in ``[0, 1]`` (e.g.
+            ``label_transfer`` max-class probability). Cells with lower
+            confidence contribute proportionally less to the loss instead of
+            being pulled just as hard as confidently-assigned ones.
+        temperature: Softmax temperature over cosine-similarity logits; lower
+            sharpens the pull toward the assigned centroid, higher softens it.
+
+    Returns:
+        Scalar loss (confidence-weighted mean cross-entropy).
+    """
+    logits = F.cosine_similarity(pred.unsqueeze(1), centroids.unsqueeze(0), dim=-1) / temperature
+    per_cell = F.cross_entropy(logits, type_idx, reduction="none")
+    if confidence is not None:
+        weight = confidence.clamp(0.0, 1.0)
+        return (per_cell * weight).sum() / weight.sum().clamp_min(1e-8)
+    return per_cell.mean()
+
+
 @torch.no_grad()
 def knn_overlap(
     pred: torch.Tensor,
@@ -137,27 +178,32 @@ def knn_overlap(
 # ---------------------------------------------------------------------------
 
 
-class AugmentationCurriculumCallback(pl.Callback):
-    """Linearly ramp augmentation strength from 0 → 1 after a warmup phase.
+class LinearRampCallback(pl.Callback):
+    """Linearly ramp a named ``pl_module`` attribute from 0 → 1 after a warmup phase.
 
-    Sets ``pl_module._aug_strength`` at the start of each training epoch.
-    During the first ``warmup_frac`` of epochs the value is 0 (no augmentation);
-    it then increases linearly to 1 over the remaining epochs.  Both
-    ``_poisson_resample_panel`` and ``_mixup_panel`` read this attribute so no
-    other wiring is needed.
+    Sets ``getattr(pl_module, attr)`` at the start of each training epoch. During
+    the first ``warmup_frac`` of epochs the value is 0; it then increases
+    linearly to 1 over the remaining epochs. Generic building block for any loss
+    weight that should ease in rather than apply at full strength from epoch 0 —
+    e.g. augmentation strength (``_aug_strength``, read by
+    ``_poisson_resample_panel``/``_mixup_panel``) or the spatial-alignment loss
+    weight in ``finetune_spatial`` (``_centroid_weight_scale``), which otherwise
+    fights the panel encoder's still-forming predictions from the first batch.
 
     Args:
-        warmup_frac: Fraction of total epochs to train with zero augmentation.
+        attr: Name of the float attribute to set on ``pl_module`` each epoch.
+        warmup_frac: Fraction of total epochs to hold the value at zero.
     """
 
-    def __init__(self, warmup_frac: float = 0.25) -> None:
+    def __init__(self, attr: str, warmup_frac: float = 0.25) -> None:
         super().__init__()
+        self.attr = attr
         self.warmup_frac = warmup_frac
 
     def on_train_epoch_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         progress = trainer.current_epoch / max(1, trainer.max_epochs)
         strength = max(0.0, (progress - self.warmup_frac) / (1.0 - self.warmup_frac))
-        pl_module._aug_strength = float(min(1.0, strength))
+        setattr(pl_module, self.attr, float(min(1.0, strength)))
 
 
 class EMACallback(pl.Callback):

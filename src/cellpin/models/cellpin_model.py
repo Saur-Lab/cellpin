@@ -43,12 +43,13 @@ from cellpin.models.utils import (
 )
 from cellpin.models.atlas_match import (
     AtlasMatchNet,
-    AugmentationCurriculumCallback,
     EMACallback,
+    LinearRampCallback,
     dist_match_loss,
     knn_overlap,
     mmd_loss,
     per_dim_r2,
+    soft_centroid_loss,
 )
 from cellpin.models.vae import CellPinVAE
 from cellpin.pl import PlotAccessor
@@ -133,6 +134,7 @@ class _FinetuneScDataset(torch.utils.data.Dataset):
             "cell_idx": torch.tensor(idx, dtype=torch.long),
             "domain": torch.tensor(0, dtype=torch.long),
             "type_idx": torch.tensor(-1, dtype=torch.long),
+            "type_conf": torch.tensor(0.0, dtype=torch.float32),
         }
 
 
@@ -141,16 +143,21 @@ class _LabeledSpatialDataset(torch.utils.data.Dataset):
 
     ``type_indices`` is an optional int tensor ``(n_sp_cells,)`` mapping each
     spatial cell to a row in ``_type_centroids``.  Pass ``None`` to fall back
-    to MMD-based alignment.
+    to MMD-based alignment.  ``type_conf`` is an optional ``(n_sp_cells,)``
+    per-cell confidence in ``[0, 1]`` (e.g. ``label_transfer``'s max-class
+    probability) that down-weights the centroid pull for uncertain pseudo-labels;
+    defaults to full confidence (``1.0``) for every labelled cell.
     """
 
     def __init__(
         self,
         base: torch.utils.data.Dataset,
         type_indices: torch.Tensor | None = None,
+        type_conf: torch.Tensor | None = None,
     ) -> None:
         self._base = base
         self._type_indices = type_indices
+        self._type_conf = type_conf
 
     def __len__(self) -> int:
         return len(self._base)
@@ -163,11 +170,17 @@ class _LabeledSpatialDataset(torch.utils.data.Dataset):
             if self._type_indices is not None
             else torch.tensor(-1, dtype=torch.long)
         )
+        type_conf = (
+            self._type_conf[idx]
+            if self._type_conf is not None
+            else torch.tensor(1.0, dtype=torch.float32)
+        )
         return {
             "panel_expr": panel,
             "cell_idx": torch.tensor(-1, dtype=torch.long),
             "domain": torch.tensor(1, dtype=torch.long),
             "type_idx": type_idx,
+            "type_conf": type_conf,
         }
 
 
@@ -294,7 +307,8 @@ class CellPin(pl.LightningModule):
         self._atlas_emb: torch.Tensor | None = None  # set by match_emb()
         self._atlas_emb_std: torch.Tensor | None = None  # precomputed standardised targets
         self._type_centroids: torch.Tensor | None = None  # set by finetune_spatial()
-        self._aug_strength: float = 1.0  # overridden per-epoch by AugmentationCurriculumCallback
+        self._aug_strength: float = 1.0  # overridden per-epoch by LinearRampCallback
+        self._centroid_weight_scale: float = 1.0  # overridden per-epoch by LinearRampCallback
         self.atlas_net: AtlasMatchNet | None = None  # built by match_emb()
         self._pretrain_completed: bool = False
         self._freeze_pretrained_in_main: bool = True
@@ -833,10 +847,16 @@ class CellPin(pl.LightningModule):
           atlas targets (``_atlas_emb_std``).  This keeps the network from
           drifting away from the atlas geometry.
 
-        * **Spatial side** — MMD aligns the distribution of spatial predictions
-          to the distribution of scRNA predictions within the same batch.
-          ``sc_pred`` is detached so MMD gradients only update the spatial path,
-          not the already-anchored scRNA path.  No labels are required.
+        * **Spatial side** — with type labels, :func:`soft_centroid_loss` softly
+          pulls each spatial cell's prediction toward its pseudo-assigned type's
+          atlas centroid (closer to it than to other centroids, not glued to the
+          exact coordinate), weighted by per-cell label confidence. Without
+          labels, MMD aligns the distribution of spatial predictions to the
+          distribution of scRNA predictions within the same batch instead
+          (``sc_pred`` is detached so gradients only update the spatial path).
+          Both terms are scaled by ``self._centroid_weight_scale``, which
+          ``LinearRampCallback`` ramps 0 → 1 over ``atlas_centroid_warmup_frac``
+          of training so alignment doesn't fight early, unsettled predictions.
         """
         if self._atlas_emb_std is None:
             raise RuntimeError("call match_emb() before finetune_spatial().")
@@ -866,24 +886,30 @@ class CellPin(pl.LightningModule):
             xsp = x_panel[sp_mask]
             sp_pred = self.atlas_net(self._spatial_resample_panel(self._mixup_panel(xsp)))
 
+            ramp = float(getattr(self, "_centroid_weight_scale", 1.0))
+
             if self._type_centroids is not None and "type_idx" in batch:
-                # Per-type centroid loss: pull each spatial cell toward the
-                # atlas centroid of its assigned cell type.  Cells with unknown
-                # type (type_idx == -1) are skipped.
+                # Soft (prototypical) centroid loss: pull each spatial cell
+                # closer to the atlas centroid of its assigned cell type than to
+                # other centroids, weighted by label-transfer confidence. Cells
+                # with unknown type (type_idx == -1) are skipped.
                 type_idx = batch["type_idx"][sp_mask]
                 valid = type_idx >= 0
                 if valid.any():
                     centroids = self._type_centroids.to(sp_pred.device)
-                    target = centroids[type_idx[valid]]
-                    centroid_loss = F.mse_loss(sp_pred[valid], target.detach())
+                    conf = batch["type_conf"][sp_mask][valid].to(sp_pred.device)
+                    temperature = float(getattr(self, "atlas_centroid_temperature", 0.1))
+                    centroid_loss = soft_centroid_loss(
+                        sp_pred[valid], centroids, type_idx[valid], confidence=conf, temperature=temperature
+                    )
                     lam = float(getattr(self, "atlas_centroid_weight", 1.0))
-                    total = total + lam * centroid_loss
+                    total = total + ramp * lam * centroid_loss
                     out["centroid_loss"] = centroid_loss
             elif sc_pred is not None:
                 # Fallback to global MMD when no type labels are available.
                 mmd = mmd_loss(sp_pred, sc_pred.detach())
                 lam_mmd = float(getattr(self, "atlas_mmd_weight", 1.0))
-                total = total + lam_mmd * mmd
+                total = total + ramp * lam_mmd * mmd
                 out["mmd_loss"] = mmd
 
         out["loss"] = total
@@ -1577,7 +1603,7 @@ class CellPin(pl.LightningModule):
         # epochs, then linearly ramp to full strength. Disable with atlas_aug_warmup_frac=0.
         aug_warmup_frac = float(getattr(self, "atlas_aug_warmup_frac", 0.25))
         if aug_warmup_frac > 0.0:
-            callbacks.append(AugmentationCurriculumCallback(warmup_frac=aug_warmup_frac))
+            callbacks.append(LinearRampCallback(attr="_aug_strength", warmup_frac=aug_warmup_frac))
 
         trainer = CellPinTrainer(
             max_epochs=max_epochs,
@@ -1605,6 +1631,7 @@ class CellPin(pl.LightningModule):
         sp_dataset: torch.utils.data.Dataset,
         sc_type_labels: np.ndarray | None = None,
         sp_type_labels: np.ndarray | None = None,
+        sp_type_confidence: np.ndarray | None = None,
         train_epochs: int = 30,
         batch_size: int = 256,
         gradient_clip_val: float = 0.5,
@@ -1623,11 +1650,16 @@ class CellPin(pl.LightningModule):
           and anchored to their fixed precomputed atlas targets
           (``_atlas_emb_std``), preventing the network from drifting.
         * **Spatial cells** are passed through with spatial augmentation and
-          pulled toward the centroid of their pseudo-assigned cell type in atlas
-          space.  Centroids are computed from the fixed scRNA atlas embeddings,
-          so the spatial embeddings are pushed toward the correct cluster geometry
-          without shuffling random cells around.  Falls back to global MMD when
-          no type labels are provided.
+          softly pulled toward the centroid of their pseudo-assigned cell type
+          in atlas space via :func:`~cellpin.models.atlas_match.soft_centroid_loss`
+          — a prototypical (cross-entropy-over-cosine-similarity) loss rather
+          than a direct MSE regression, so a cell only needs to end up *closer*
+          to its own type's centroid than to the others, not glued to the exact
+          coordinate.  The pull is weighted by ``sp_type_confidence`` (so
+          uncertain pseudo-labels move cells less) and ramped in linearly over
+          the first ``atlas_centroid_warmup_frac`` of epochs (so alignment
+          doesn't fight the panel encoder's still-forming predictions from
+          epoch 0).  Falls back to global MMD when no type labels are provided.
 
         Validation is run on the scRNA held-out split so that ``val_r2_mean``
         and ``val_knn_overlap`` monitor anchor quality throughout fine-tuning.
@@ -1641,6 +1673,12 @@ class CellPin(pl.LightningModule):
             sp_type_labels: String cell-type labels aligned with ``sp_dataset``
                 rows (e.g. from ``label_transfer``).  Each spatial cell is pulled
                 toward the centroid of its assigned type.
+            sp_type_confidence: Optional per-cell confidence in ``[0, 1]``
+                aligned with ``sp_type_labels`` (e.g.
+                ``sp_adata.obs["cellpin_annotation_certainty"]`` from
+                ``label_transfer``). Low-confidence assignments contribute less
+                to the centroid pull. Defaults to full confidence (``1.0``) for
+                every labelled cell.
             train_epochs: Maximum fine-tuning epochs.
             batch_size: Mini-batch size (sc + sp cells are mixed in each batch).
             gradient_clip_val: Gradient clipping value.
@@ -1655,9 +1693,17 @@ class CellPin(pl.LightningModule):
             raise RuntimeError("call match_emb() before finetune_spatial().")
 
         # --- Compute per-type centroids in standardised atlas space -----------
+        # Only types present in sc_type_labels have a real (non-degenerate)
+        # centroid, since centroids are accumulated from scRNA atlas embeddings
+        # only. Any sp_type_labels value with no scRNA ground truth — including
+        # "Unknown" from label_transfer's conf_threshold — must NOT get its own
+        # slot here, or it would default to an all-zero (atlas-mean) centroid
+        # and silently pull those cells toward it. type_to_idx.get(..., -1)
+        # below maps such labels to -1, which the "valid" mask in
+        # compute_losses_finetune_spatial then skips entirely.
         sp_type_indices: torch.Tensor | None = None
         if sc_type_labels is not None and sp_type_labels is not None:
-            all_types = sorted(set(sc_type_labels) | set(sp_type_labels))
+            all_types = sorted(set(sc_type_labels))
             type_to_idx = {t: i for i, t in enumerate(all_types)}
             n_types = len(all_types)
             emb_dim = self._atlas_emb_std.shape[1]
@@ -1678,7 +1724,7 @@ class CellPin(pl.LightningModule):
                 dtype=torch.long,
             )
             print(
-                f"  [finetune_spatial] Using per-type centroid loss "
+                f"  [finetune_spatial] Using soft per-type centroid loss "
                 f"({n_types} types, {(sp_type_indices >= 0).sum().item()} / "
                 f"{len(sp_type_indices)} spatial cells matched)"
             )
@@ -1686,9 +1732,13 @@ class CellPin(pl.LightningModule):
             self._type_centroids = None
             print("  [finetune_spatial] No type labels provided — falling back to MMD.")
 
+        sp_type_conf: torch.Tensor | None = None
+        if sp_type_confidence is not None:
+            sp_type_conf = torch.tensor(np.asarray(sp_type_confidence, dtype=np.float32))
+
         # --- Build mixed dataset: scRNA (anchor) + spatial -------------------
         sc_ft = _FinetuneScDataset(sc_dataset)
-        sp_ft = _LabeledSpatialDataset(sp_dataset, type_indices=sp_type_indices)
+        sp_ft = _LabeledSpatialDataset(sp_dataset, type_indices=sp_type_indices, type_conf=sp_type_conf)
         mixed_dataset = torch.utils.data.ConcatDataset([sc_ft, sp_ft])
 
         # scRNA val-only split to monitor anchor quality
@@ -1718,6 +1768,16 @@ class CellPin(pl.LightningModule):
         callbacks = list(custom_callbacks) if custom_callbacks else []
         if ema_decay > 0.0:
             callbacks.append(EMACallback(decay=ema_decay))
+        # Ramp the spatial-alignment loss (centroid pull / MMD) in linearly so it
+        # doesn't fight the panel encoder's still-forming predictions from epoch 0.
+        # Disable with atlas_centroid_warmup_frac=0.
+        centroid_warmup_frac = float(getattr(self, "atlas_centroid_warmup_frac", 0.3))
+        if centroid_warmup_frac > 0.0:
+            callbacks.append(
+                LinearRampCallback(attr="_centroid_weight_scale", warmup_frac=centroid_warmup_frac)
+            )
+        else:
+            self._centroid_weight_scale = 1.0
 
         trainer = CellPinTrainer(
             max_epochs=max_epochs,
