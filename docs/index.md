@@ -55,4 +55,5 @@ contributing.md
 
 notebooks/cellpin_tutorial
 notebooks/label_transfer
+notebooks/atera_whole_transcriptome
 ```
