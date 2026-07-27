@@ -1,0 +1,42 @@
+cff-version: 1.2.0
+message: "If you use cellpin in your research, please cite the preprint below."
+title: "cellpin"
+abstract: >-
+  cellpin is a lightweight probabilistic model that reconstructs and denoises
+  spatial transcriptomes from single-cell RNA-seq references. It enables
+  transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and
+  improved biological interpretation of both targeted-panel and
+  full-transcriptome spatial datasets.
+type: software
+license: MIT
+version: 0.1.1
+repository-code: "https://github.com/Saur-Lab/cellpin"
+url: "https://cellpin.readthedocs.io/"
+authors:
+  - family-names: Putze
+    given-names: Philipp
+  - family-names: Lucarelli
+    given-names: Daniele
+preferred-citation:
+  type: article
+  title: "Cellpin enables reference-based imputation and denoising of spatial transcriptomes"
+  journal: bioRxiv
+  year: 2026
+  doi: 10.64898/2026.06.02.729566
+  url: "https://doi.org/10.64898/2026.06.02.729566"
+  notes: "Philipp Putze and Daniele Lucarelli contributed equally (shared first authorship)."
+  authors:
+    - family-names: Putze
+      given-names: Philipp
+    - family-names: Lucarelli
+      given-names: Daniele
+    - family-names: Wellappili
+      given-names: Deelaka
+    - family-names: Bahrami
+      given-names: Mojtaba
+    - family-names: Luecken
+      given-names: Malte D.
+    - family-names: Theis
+      given-names: Fabian J.
+    - family-names: Saur
+      given-names: Dieter
