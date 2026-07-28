@@ -30,7 +30,7 @@ This is useful when you want to:
 
 - **Detect cell types whose markers are absent from your panel.** Panels are finite; the cell types in your tissue are not.
 - **Test hypotheses that depend on unmeasured genes**, without designing and running a new panel.
-- **Run analyses that noise would otherwise corrupt** — differential expression, cell–cell communication, neighbourhood statistics — without missegmentation and transcript-diffusion artefacts driving the result.
+- **Run analyses that noise would otherwise corrupt**, such as differential expression, cell–cell communication and neighbourhood statistics, without missegmentation and transcript-diffusion artefacts driving the result.
 
 The [Xenium denoising tutorial](notebooks/xenium_denoising.ipynb) works through the second point in detail, showing spurious B-cell markers being removed from neighbouring epithelial cells.
 
@@ -40,18 +40,10 @@ Transfer annotations from a reference dataset to annotate your spatial data auto
 
 ## One model, one forward pass
 
-These are not three separate workflows. A single trained model and a single forward pass give you a high-quality embedding, imputed and denoised expression profiles, and transferred cell-state annotations at once — a solid starting point for essentially any spatial analysis.
-
-## Caveats worth reading
-
-We are confident in cellpin's performance, but a few things are worth stating plainly.
-
-**Do not base conclusions exclusively on imputed counts.** Treat imputation as a hypothesis generator and a denoising step, not as ground truth. Always check that the measured data does not contradict your findings. The tutorials keep the measured layers alongside the imputed ones precisely so this comparison stays easy.
-
-**Label transfer is bounded by your reference annotation.** It can only be as good as the labels you transfer from. For some datasets this works very well; for others we recommend marker-based annotation of Leiden clusters computed on the cellpin neighbourhood graph instead.
+These are not three separate workflows. A single trained model and a single forward pass give you a high-quality embedding, imputed and denoised expression profiles, and transferred cell-state annotations at once, a solid starting point for essentially any spatial analysis.
 
 ## Next steps
 
-- [Best Practices](best_practices.md) — practical recommendations before you train
-- [Basic usage tutorial](notebooks/cellpin_tutorial.ipynb) — the core imputation workflow
-- [API reference](api.md) — all tunable parameters
+- [Best Practices](best_practices.md): practical recommendations before you train
+- [Basic usage tutorial](notebooks/cellpin_tutorial.ipynb): the core imputation workflow
+- [API reference](api.md): all tunable parameters

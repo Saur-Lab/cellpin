@@ -34,6 +34,32 @@ pip install "cellpin[spatial]"
 uv pip install "cellpin[spatial]"
 ```
 
+## Quickstart
+
+```python
+import cellpin
+import torch
+
+# sc_adata: annotated scRNA-seq reference   sp_adata: your spatial data
+# both need raw integer counts in .X or a named layer
+sc_dataset, sp_dataset = cellpin.pp.setup_data(sc_adata, sp_adata, layer="counts")
+
+model = cellpin.CellPin(sc_dataset)
+model.fit(sc_dataset)
+
+dl = torch.utils.data.DataLoader(sp_dataset, batch_size=512, shuffle=False)
+adata = model.impute(dl, obs_adata=sp_adata, return_norm=True, return_int=True)
+```
+
+One forward pass gives you all three outputs at once:
+
+- `adata.obsm["X_cellpin"]`: the cell embedding, ready for `sc.pp.neighbors(use_rep="X_cellpin")`
+- `adata.layers["imputed"]`: denoised integer counts across the full reference gene space
+- `cellpin.tl.label_transfer(model, sc_adata, "cell_type", adata)`: annotations from the reference
+
+The [basic usage tutorial](notebooks/cellpin_tutorial.ipynb) walks through this end to end, and
+[Best Practices](best_practices.md) is worth a read before your first real training run.
+
 ## Release notes
 
 See the [changelog](changelog.md).
