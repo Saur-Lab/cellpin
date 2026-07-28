@@ -1,5 +1,11 @@
 # Use Cases
 
+```{image} _static/cellpin_usecases.png
+:align: right
+:width: 220px
+:class: no-bg
+```
+
 ## When should you use cellpin?
 
 Cellpin is worth reaching for whenever you have **single-cell resolved spatial transcriptomics data** and intend to do any kind of downstream analysis with it.
