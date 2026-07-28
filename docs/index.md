@@ -8,6 +8,8 @@
 
 Cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
 
+New here? [Use cases](use_cases.md) covers what cellpin is good for and when to reach for it.
+
 ## Installation
 
 Python 3.11 or newer is required.
@@ -48,6 +50,7 @@ Putze P*, Lucarelli D*, Wellappili D, Bahrami M, Luecken MD, Theis FJ, Saur D. C
 :hidden: true
 :maxdepth: 1
 
+use_cases.md
 api.md
 best_practices.md
 changelog.md
@@ -55,5 +58,6 @@ contributing.md
 
 notebooks/cellpin_tutorial
 notebooks/label_transfer
+notebooks/xenium_denoising
 notebooks/atera_whole_transcriptome
 ```
