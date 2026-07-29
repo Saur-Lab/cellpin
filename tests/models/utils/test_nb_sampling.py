@@ -132,3 +132,19 @@ def test_invalid_arguments(mu_theta):
         mc_log1p_norm(mu, theta[:5], 2, TARGET)
     with pytest.raises(ValueError, match="scale"):
         mc_log1p_norm(mu, theta, 2, TARGET, scale=np.ones(3))
+
+
+def test_default_threads_respects_cpu_affinity(monkeypatch):
+    """Thread count must follow CPU affinity, not the host core count."""
+    from cellpin.models.utils import nb_sampling
+
+    monkeypatch.setattr(nb_sampling.os, "cpu_count", lambda: 256)
+    monkeypatch.setattr(nb_sampling.os, "sched_getaffinity", lambda _: set(range(2)))
+    assert nb_sampling._default_threads() == 2
+
+    monkeypatch.setattr(nb_sampling.os, "sched_getaffinity", lambda _: set(range(200)))
+    assert nb_sampling._default_threads() == nb_sampling._MAX_THREADS
+
+    # Platforms without sched_getaffinity fall back to cpu_count.
+    monkeypatch.delattr(nb_sampling.os, "sched_getaffinity")
+    assert nb_sampling._default_threads() == nb_sampling._MAX_THREADS

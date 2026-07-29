@@ -37,6 +37,24 @@ _MIN_CHUNKS = 64
 # Floor on mu before forming the NB success probability / Gamma rate.
 _MU_FLOOR = 1e-8
 
+# Above this the thread pool stops paying for itself.
+_MAX_THREADS = 32
+
+
+def _default_threads() -> int:
+    """Return the number of CPUs this process may actually run on.
+
+    ``os.cpu_count()`` reports the host's cores and ignores CPU affinity, so
+    under a scheduler that pins jobs to a cpuset (Slurm, containers) it
+    over-reports badly: a 2-core allocation on a 36-core node still reads 36,
+    and the pool then oversubscribes its cores by an order of magnitude.
+    ``sched_getaffinity`` reports the real allocation, but is Linux-only.
+    """
+    try:
+        return min(_MAX_THREADS, len(os.sched_getaffinity(0)))
+    except AttributeError:  # not available on macOS / Windows
+        return min(_MAX_THREADS, os.cpu_count() or 1)
+
 
 def _cell_chunks(n_cells: int, n_genes: int) -> list[slice]:
     """Split the cell axis into chunks bounded by :data:`_CHUNK_ELEMENTS`.
@@ -135,7 +153,9 @@ def mc_log1p_norm(
             selects the threaded numpy backend, which is faster on CPU because
             torch's CPU RNG is single-threaded.
         n_threads: Worker threads for the numpy backend.  Defaults to the
-            number of CPUs, capped at 32.  Ignored by the torch backend.
+            number of CPUs this process is actually allowed to use (CPU
+            affinity, so Slurm and container allocations are respected),
+            capped at 32.  Ignored by the torch backend.
 
     Returns:
     -------
@@ -158,7 +178,7 @@ def mc_log1p_norm(
     device = torch.device(device) if device is not None else None
     use_torch = device is not None and device.type != "cpu"
 
-    n_workers = 1 if use_torch else (n_threads or min(32, os.cpu_count() or 1))
+    n_workers = 1 if use_torch else (n_threads or _default_threads())
     chunks = _cell_chunks(n_cells, n_genes)
     seeds = np.random.SeedSequence(seed).spawn(len(chunks))
 
