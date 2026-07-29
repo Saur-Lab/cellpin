@@ -3,6 +3,7 @@
 import anndata as ad
 import numpy as np
 import pytest
+import torch
 from torch.utils.data import DataLoader
 
 from cellpin.models import CellPin
@@ -181,3 +182,79 @@ def test_impute_return_int_sparse(small_datasets):
     assert sp.issparse(adata_out.layers["imputed"])
     assert adata_out.layers["imputed"].dtype == np.int32
     assert adata_out.X.min() >= 0
+
+
+def test_impute_return_norm(small_datasets):
+    """return_norm=True adds a finite, non-negative imputed_norm layer."""
+    import scipy.sparse as sp
+
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    model.eval()
+
+    loader = DataLoader(st_ds, batch_size=4, shuffle=False)
+    adata_out = model.impute(loader, mc_samples=2, return_norm=True, nb_count_samples=10, return_sparse=False)
+
+    norm = adata_out.layers["imputed_norm"]
+    assert not sp.issparse(norm)
+    assert norm.shape == (len(st_ds), sc_ds.X.shape[1])
+    assert norm.dtype == np.float32
+    assert np.isfinite(norm).all()
+    assert (norm >= 0).all()
+
+    adata_sparse = model.impute(loader, mc_samples=2, return_norm=True, nb_count_samples=10, return_sparse=True)
+    assert sp.issparse(adata_sparse.layers["imputed_norm"])
+
+
+def test_impute_nb_seed_is_reproducible(small_datasets):
+    """nb_seed pins the imputed_norm layer; omitting it does not."""
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    model.eval()
+
+    loader = DataLoader(st_ds, batch_size=4, shuffle=False)
+    kwargs = {
+        "mc_samples": 2,
+        "return_norm": True,
+        "nb_count_samples": 10,
+        "return_sparse": False,
+    }
+    # mc_impute makes the counts themselves stochastic, so pin the whole run.
+    torch.manual_seed(0)
+    a = model.impute(loader, nb_seed=123, **kwargs).layers["imputed_norm"]
+    torch.manual_seed(0)
+    b = model.impute(loader, nb_seed=123, **kwargs).layers["imputed_norm"]
+    torch.manual_seed(0)
+    c = model.impute(loader, nb_seed=456, **kwargs).layers["imputed_norm"]
+
+    np.testing.assert_array_equal(a, b)
+    assert not np.array_equal(a, c)
+
+
+def test_impute_return_norm_area_key(small_datasets):
+    """area_key switches to area normalisation and rejects non-positive areas."""
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    model.eval()
+
+    loader = DataLoader(st_ds, batch_size=4, shuffle=False)
+    obs_adata = ad.AnnData(X=np.zeros((len(st_ds), 0), dtype=np.float32))
+    obs_adata.obs["cell_area"] = np.linspace(20.0, 100.0, len(st_ds))
+
+    adata_out = model.impute(
+        loader,
+        obs_adata=obs_adata,
+        mc_samples=2,
+        return_norm=True,
+        nb_count_samples=10,
+        area_key="cell_area",
+        return_sparse=False,
+    )
+    assert np.isfinite(adata_out.layers["imputed_norm"]).all()
+
+    with pytest.raises(ValueError, match="not found in adata.obs"):
+        model.impute(loader, obs_adata=obs_adata, mc_samples=2, return_norm=True, area_key="missing")
+
+    obs_adata.obs["cell_area"] = 0.0
+    with pytest.raises(ValueError, match="areas must be positive"):
+        model.impute(loader, obs_adata=obs_adata, mc_samples=2, return_norm=True, area_key="cell_area")
