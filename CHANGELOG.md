@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## [0.2.0] - 2026-07-29
+ 
+- Significant (>10x) speed up in impute function, specifically
+  parallelisation and GPU support for normalisation
+
+
 ## [0.1.1] - 2026-06-10
 
 - Changed to sparse outputs
