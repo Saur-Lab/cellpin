@@ -39,6 +39,7 @@ from cellpin.dataset import scAnnDataset
 from cellpin.models.utils import (
     build_data_loaders,
     load_config_and_checkpoint,
+    mc_log1p_norm,
     save_checkpoint,
 )
 from cellpin.models.vae import CellPinVAE
@@ -1093,6 +1094,7 @@ class CellPin(pl.LightningModule):
         norm_target_sum: float = 1e3,
         area_key: str | None = None,
         nb_count_samples: int = 100,
+        nb_seed: int | None = None,
         return_int: bool = False,
         return_sparse: bool = True,
         table_key: str = "table",
@@ -1122,6 +1124,12 @@ class CellPin(pl.LightningModule):
                 Because log1p is concave, Jensen's inequality means
                 ``log1p(norm(E[X])) > E[log1p(norm(X))]``; sampling inside the
                 transform corrects this bias.  More samples → lower variance.
+            nb_seed: Seed for the NB draws (only used when ``return_norm=True``).
+                Pass an integer for a reproducible ``layers['imputed_norm']``;
+                ``None`` (default) draws fresh entropy on every call.  For a
+                fixed seed the result is independent of thread count, though
+                CPU and GPU use different samplers and so agree only up to
+                Monte-Carlo error.
             return_int: If ``True``, round ``X`` to integer counts (``int32``).
             return_sparse: If ``True`` (default), store ``X``, ``layers['imputed']``,
                 and ``layers['imputed_norm']`` as :class:`scipy.sparse.csr_matrix`.
@@ -1175,9 +1183,6 @@ class CellPin(pl.LightningModule):
             # drawing K samples from NB, normalising and log1p-ing each draw,
             # then averaging — so norm+log1p go *inside* the MC loop.
             px_r_np = np.exp(self.vae.px_r.detach().cpu().numpy()).astype(np.float64)  # (n_genes,)
-            mu = counts.astype(np.float64)
-            # NB success-probability: p = theta / (theta + mu)
-            p = px_r_np / (px_r_np + np.clip(mu, 1e-8, None))
 
             # Resolve area column: explicit > auto-detect "cell_area" > None
             resolved_area_key = area_key
@@ -1194,18 +1199,15 @@ class CellPin(pl.LightningModule):
             else:
                 scale = None  # use per-draw library size
 
-            K = max(nb_count_samples, 1)
-            log1p_acc = np.zeros_like(mu)
-            for _ in range(K):
-                draw = np.random.negative_binomial(px_r_np, p).astype(np.float64)
-                if scale is not None:
-                    normed = draw * scale[:, np.newaxis]
-                else:
-                    lib = draw.sum(axis=1, keepdims=True).clip(1e-12)
-                    normed = draw * (norm_target_sum / lib)
-                log1p_acc += np.log1p(normed)
-
-            norm_layer = (log1p_acc / K).astype(np.float32)
+            norm_layer = mc_log1p_norm(
+                counts,
+                px_r_np,
+                n_samples=max(nb_count_samples, 1),
+                norm_target_sum=norm_target_sum,
+                scale=scale,
+                seed=nb_seed,
+                device=self.device,
+            )
             adata_out.layers["imputed_norm"] = sp.csr_matrix(norm_layer) if return_sparse else norm_layer
 
         if sdata is not None:
