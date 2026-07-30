@@ -26,7 +26,7 @@ We strongly recommend setting `return_int=True` when retrieving reconstructed ex
 
 ## Accounting for batch effects
 
-If your spatial data or reference contains strong batch effects, make use of the `batch_key` parameter during setup. Passing a batch annotation allows cellpin to account for technical variation during training and typically leads to cleaner cell-type assignments and more accurate expression reconstruction.
+If your reference contains strong batch effects, make use of the `batch_key` parameter during setup. Passing a batch annotation allows cellpin to account for technical variation during training and typically leads to cleaner cell-type assignments and more accurate expression reconstruction.
 
 ## Inspect label transfer results
 

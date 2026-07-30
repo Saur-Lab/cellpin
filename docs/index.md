@@ -6,6 +6,7 @@
 :width: 800px
 ```
 
+
 Cellpin is a lightweight probabilistic model that reconstructs and denoises spatial transcriptomes from single-cell RNA-seq references. It enables transcriptome-wide imputation, robust atlas-to-spatial label-transfer, and improved biological interpretation of both targeted-panel and full-transcriptome spatial datasets.
 
 New here? [Use cases](use_cases.md) covers what cellpin is good for and when to reach for it.
@@ -40,8 +41,8 @@ uv pip install "cellpin[spatial]"
 import cellpin
 import torch
 
-# sc_adata: annotated scRNA-seq reference   sp_adata: your spatial data
-# both need raw integer counts in .X or a named layer
+# sc_adata: scRNA-seq reference   sp_adata: your single-cell resolved spatial data
+# both need raw integer counts in .X or a named layer e.g. "counts"
 sc_dataset, sp_dataset = cellpin.pp.setup_data(sc_adata, sp_adata, layer="counts")
 
 model = cellpin.CellPin(sc_dataset)

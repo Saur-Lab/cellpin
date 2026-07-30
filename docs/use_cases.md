@@ -16,7 +16,7 @@ Everything below applies to both panel-based platforms (e.g. Xenium) and full-tr
 
 ## 1. Biologically meaningful embeddings
 
-Spatial transcriptomics data is noisy and full of technical artefacts. That makes it hard to produce meaningful cell embeddings, and close to impossible to resolve rare cell states or fine-grained subtypes using embeddings computed directly on the raw counts.
+Spatial transcriptomics data is noisy and full of technical artefacts. That makes it hard to produce meaningful cell embeddings, and close to impossible to resolve rare cell states or fine-grained subtypes using embeddings derived from linear methods.
 
 Cellpin embeddings are clean while retaining, and often recovering, the biological signal that downstream analysis depends on. Importantly, cellpin does not impose an explicit cross-dataset alignment, so it will not force cells into a reference position where they do not belong, which is a failure mode of methods that make stronger mapping assumptions.
 
