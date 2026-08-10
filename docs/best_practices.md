@@ -41,3 +41,7 @@ Label transfer results are only as good as the reference and the biological simi
 **Flat or shaky curves are usually fine.** When the panel already carries most of the reference signal, Stage 1 has done the job and Stage 2 only fine-tunes, so the curve flattens. Jagged curves are often just a narrow y-axis, so check the value range first.
 
 Use the plot to rule out real problems (divergence, `NaN`s, a steadily climbing loss), then judge the model on what matters: imputation correlation on panel genes, known markers behaving as expected, and whether the embedding separates the cell types you expect.
+
+## Getting the most out of cellpin
+
+Feed reasonably well-segmented cells into cellpin. While cellpin significantly helps denoise expression data, it is not, per se, a segmentation method. We recommend either using **10x Genomics' multi-stain segmented cells** or running a dedicated image-based segmentation algorithm before feeding data to cellpin. We had the best experience with **Cellpose**-segmented data.
