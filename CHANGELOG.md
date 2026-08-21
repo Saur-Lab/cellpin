@@ -11,11 +11,7 @@ and this project adheres to [Semantic Versioning][].
 ## [0.3.0] - 2026-08-21
 
 - Added `kl_free_bits`, an opt-in per-latent-dimension floor on the KL term
-  (default `0.0`, unchanged behavior). Counters within-cell-type variance
-  collapse — cells of the same type reconstructing near-identically despite
-  real sub-state heterogeneity (e.g. activated vs. exhausted). See
-  [Best Practices](docs/best_practices.md) for guidance; not a guaranteed
-  fix, but worth sweeping if reconstructions look over-smoothed.
+  (default `0.0`, unchanged behavior). Useful to ablate (e.g. 2.0) for more granular reconstruction.
 
 ## [0.2.0] - 2026-07-29
  
