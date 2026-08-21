@@ -42,6 +42,14 @@ Label transfer results are only as good as the reference and the biological simi
 
 Use the plot to rule out real problems (divergence, `NaN`s, a steadily climbing loss), then judge the model on what matters: imputation correlation on panel genes, known markers behaving as expected, and whether the embedding separates the cell types you expect.
 
+## Sharper reconstructions
+
+If reconstructions look over-smoothed (e.g. cells of the same type losing fine-grained heterogeneity), try a free-bits floor on the KL term via `kl_free_bits`. This isn't a guaranteed fix and the best value is dataset-dependent, but it's worth a small sweep — in our own tests `2.0` sharpened panel-gene reconstruction noticeably without hurting accuracy.
+
+```python
+model = cellpin.CellPin(sc_dataset, config={"kl_free_bits": 2.0})
+```
+
 ## Getting the most out of cellpin
 
 Feed reasonably well-segmented cells into cellpin. While cellpin significantly helps denoise expression data, it is not, per se, a segmentation method. We recommend either using **10x Genomics' multi-stain segmented cells** or running a dedicated image-based segmentation algorithm before feeding data to cellpin. We had the best experience with **Cellpose**-segmented data.
