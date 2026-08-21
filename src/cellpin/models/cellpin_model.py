@@ -373,6 +373,36 @@ class CellPin(pl.LightningModule):
         r = num / denom  # (G,) in [-1, 1]
         return 1.0 - r.mean()
 
+    def _kl_z_loss(self, qz_m: torch.Tensor, qz_v: torch.Tensor) -> torch.Tensor:
+        """KL(q(z|x) || N(0,1)), summed over latent dims, batch-averaged.
+
+        With ``kl_free_bits`` at its default of ``0.0`` this is exactly the
+        original per-sample KL, summed over dims then averaged over the
+        batch — unchanged behavior.
+
+        ``kl_free_bits > 0`` (opt-in) applies a per-dimension free-bits
+        floor (Kingma et al. 2016, "Improving Variational Inference with
+        Inverse Autoregressive Flow"): each latent dimension's KL,
+        averaged over the batch first, is clamped at this minimum before
+        summing. Below the floor the KL term stops penalizing that
+        dimension, removing the optimizer's incentive to collapse it to
+        the prior purely to save loss on cells where the signal it would
+        carry (e.g. within-cell-type sub-state variation) gives only a
+        small reconstruction payoff. Batch-averaging before the clamp
+        (rather than clamping per-sample) matters: clamping per-sample
+        lets the floor be satisfied by being generous on easy cells while
+        still collapsed on hard ones.
+        """
+        qz_v = qz_v.clamp(min=1e-4, max=1e4)
+        kl_per_dim = kl(
+            Normal(qz_m, qz_v.sqrt()),
+            Normal(torch.zeros_like(qz_m), torch.ones_like(qz_v)),
+        )  # (batch, latent_dim)
+        free_bits = float(getattr(self, "kl_free_bits", 0.0))
+        if free_bits > 0.0:
+            return kl_per_dim.mean(dim=0).clamp(min=free_bits).sum()
+        return kl_per_dim.sum(dim=1).mean()
+
     def _mask_recon_to_no_panel(
         self,
         x: torch.Tensor,
@@ -437,11 +467,7 @@ class CellPin(pl.LightningModule):
         )
 
         # ELBO components — KL against prior
-        qz_v_clamped = out["qz_v"].clamp(min=1e-4, max=1e4)
-        kl_z = kl(
-            Normal(out["qz_m"], qz_v_clamped.sqrt()),
-            Normal(torch.zeros_like(out["qz_m"]), torch.ones_like(qz_v_clamped)),
-        ).sum(dim=1)
+        kl_loss = self._kl_z_loss(out["qz_m"], out["qz_v"])
 
         kl_l = kl(
             Normal(out["ql_m"], out["ql_v"].sqrt()),
@@ -455,7 +481,6 @@ class CellPin(pl.LightningModule):
                 x_full, out["px_rate"], out["px_r"], out["px_dropout"]
             )
         reconst_loss = self.vae.get_reconstruction_loss(x_r, rate_r, r_r, drop_r).mean()
-        kl_loss = kl_z.mean()
 
         # Optional Pearson correlation loss on the full encoder output
         lambda_pearson = float(getattr(self, "lambda_pearson", 0.0))
@@ -466,6 +491,7 @@ class CellPin(pl.LightningModule):
 
         w = self._get_loss_weights("pretrain")
         kl_w = self._kl_annealing_weight() * w["kl_weight"]
+
         total = (
             w["recon"] * reconst_loss
             + kl_w * kl_loss
@@ -531,11 +557,7 @@ class CellPin(pl.LightningModule):
         )
 
         # ---- ELBO from panel outputs — KL against prior ----
-        panel_qz_v_elbo = out_panel["qz_v"].clamp(min=1e-4, max=1e4)
-        kl_z = kl(
-            Normal(out_panel["qz_m"], panel_qz_v_elbo.sqrt()),
-            Normal(torch.zeros_like(out_panel["qz_m"]), torch.ones_like(panel_qz_v_elbo)),
-        ).sum(dim=1)
+        kl_loss = self._kl_z_loss(out_panel["qz_m"], out_panel["qz_v"])
 
         kl_l = kl(
             Normal(out_panel["ql_m"], out_panel["ql_v"].sqrt()),
@@ -549,7 +571,6 @@ class CellPin(pl.LightningModule):
                 x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"]
             )
         reconst_loss = self.vae.get_reconstruction_loss(x_r, rate_r, r_r, drop_r).mean()
-        kl_loss = kl_z.mean()
 
         # ---- Optional Pearson correlation loss ----
         # lambda_pearson=0.0 → disabled (default).
@@ -587,6 +608,7 @@ class CellPin(pl.LightningModule):
         inv_loss = w.get("distill", 1.0) * distill_loss + w.get("snn", 0.1) * snn
 
         kl_w = self._kl_annealing_weight() * w["kl_weight"]
+
         total = (
             w["recon"] * reconst_loss
             + kl_w * kl_loss
@@ -655,16 +677,14 @@ class CellPin(pl.LightningModule):
             params = list(self.parameters())
         else:
             params = [p for p in self.parameters() if p.requires_grad]
-        optimizer = torch.optim.AdamW(
-            params,
-            lr=float(self.hparams.get("lr", 1e-3)),
-            weight_decay=float(self.hparams.get("weight_decay", 1e-4)),
-        )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=int(self.hparams.get("max_epochs", 100)),
-            eta_min=float(self.hparams.get("lr", 1e-3)) * 0.1,
-        )
+
+        lr = float(self.hparams.get("lr", 1e-3))
+        weight_decay = float(self.hparams.get("weight_decay", 1e-4))
+        max_epochs = int(self.hparams.get("max_epochs", 100))
+
+        optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs, eta_min=lr * 0.1)
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {

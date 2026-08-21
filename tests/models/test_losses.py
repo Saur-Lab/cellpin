@@ -2,6 +2,8 @@ from unittest.mock import PropertyMock, patch
 
 import pytest
 import torch
+from torch.distributions import Normal
+from torch.distributions import kl_divergence as kl
 
 from cellpin.models.cellpin_model import CellPin, soft_nn_loss
 
@@ -150,3 +152,35 @@ class TestPoissonResample:
         x = torch.rand(8, 8) * 20
         out = model._poisson_resample_panel(x)
         assert torch.allclose(out, out.floor())
+
+
+class TestKLFreeBits:
+    def test_disabled_by_default(self, sc_dataset):
+        model = _make_model(sc_dataset)
+        assert model.kl_free_bits == 0.0
+
+    def test_disabled_matches_plain_kl(self, sc_dataset):
+        model = _make_model(sc_dataset, kl_warmup_epochs=0)
+        torch.manual_seed(0)
+        qz_m = torch.randn(16, 4) * 0.01
+        qz_v = torch.full((16, 4), 0.999)
+        kl_per_dim = kl(Normal(qz_m, qz_v.sqrt()), Normal(torch.zeros_like(qz_m), torch.ones_like(qz_v)))
+        expected = kl_per_dim.sum(dim=1).mean()
+        assert model._kl_z_loss(qz_m, qz_v).item() == pytest.approx(expected.item(), rel=1e-5)
+
+    def test_floor_raises_near_collapsed_posterior(self, sc_dataset):
+        model = _make_model(sc_dataset, kl_warmup_epochs=0, kl_free_bits=0.5)
+        qz_m = torch.randn(64, 10) * 0.01
+        qz_v = torch.full((64, 10), 0.999)
+        loss = model._kl_z_loss(qz_m, qz_v)
+        assert loss.item() >= 10 * 0.5 - 1e-4
+
+    def test_floor_is_noop_once_kl_already_above_it(self, sc_dataset):
+        torch.manual_seed(0)
+        qz_m = torch.randn(64, 10) * 3.0
+        qz_v = torch.full((64, 10), 0.5)
+        model = _make_model(sc_dataset, kl_warmup_epochs=0, kl_free_bits=0.01)
+        floored = model._kl_z_loss(qz_m, qz_v)
+        model.kl_free_bits = 0.0
+        unfloored = model._kl_z_loss(qz_m, qz_v)
+        assert floored.item() == pytest.approx(unfloored.item(), rel=1e-4)

@@ -26,6 +26,9 @@ DEFAULT_PARAMS = {
     "lambda_recon": 1.17,
     "kl_weight": 0.08,
     "kl_warmup_epochs": 20,
+    # Free-bits floor on KL(z), per latent dim, batch-averaged before the
+    # clamp (opt-in; 0.0 = disabled, original per-sample KL unchanged)
+    "kl_free_bits": 0.0,
     "lambda_inv": 20.0,
     "lambda_snn": 0.085,
     "lambda_distill": 1.0,
