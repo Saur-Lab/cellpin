@@ -22,6 +22,8 @@ loader = DataLoader(st_ds, batch_size=256, shuffle=False)
 adata_out = model.impute(loader, obs_adata=st_adata)
 ```
 
+Expected run time for the [demo notebook](docs/notebooks/cellpin_tutorial.ipynb) (train + impute, example dataset): ~10 minutes on a single GPU (e.g. NVIDIA L4).
+
 ## Installation
 
 **pip**
@@ -36,6 +38,8 @@ pip install cellpin
 uv pip install cellpin
 ```
 
+Typical install time on a normal desktop computer: ~1 minute (uv, broadband connection).
+
 For SpatialData support add the spatial extras:
 
 ```bash
@@ -43,6 +47,8 @@ pip install "cellpin[spatial]"
 # or
 uv pip install "cellpin[spatial]"
 ```
+
+cellpin is computationally lightweight, but a GPU is highly recommended for training and imputation speed.
 
 ## Documentation
 
