@@ -70,3 +70,7 @@ If you use cellpin in your research, please cite:
 }
 ```
 
+## Reproducibility
+To reproduce findings of the manuscript please see: https://github.com/Saur-Lab/cellpin_manuscript_reproducibility
+
+
