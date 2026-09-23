@@ -14,7 +14,7 @@ We recommend using at least **20,000 reference cells** for reliable imputation. 
 
 ## Batch size for large atlases
 
-When mapping against large-scale cell atlases, consider increasing the batch size to **512 or 1024**. The default batch size is optimized for typical reference sizes, but larger batches give the SNN-loss more within-batch diversity to work with, which improves training stability at scale.
+When training against large-scale cell atlases, consider increasing the batch size to **512 or 1024**. The default batch size is optimized for typical reference sizes, but larger batches give the SNN-loss more within-batch diversity to work with, which improves training stability at scale.
 
 ## Default parameters
 
@@ -22,7 +22,7 @@ Default parameters have been shown to work robustly across a broad range of tiss
 
 ## Integer counts for denoised expression
 
-We strongly recommend setting `return_int=True` when retrieving reconstructed expression profiles. This rounds the output to integer counts, making the denoised matrix directly compatible with tools that expect raw-count-like input, including differential expression methods, trajectory inference, and most standard Scanpy/Seurat workflows.
+We strongly recommend setting `return_int=True` when retrieving reconstructed expression profiles. This rounds the output to integer counts, making the denoised matrix directly compatible with tools that expect raw-count-like input, including differential expression methods, trajectory inference, and most standard Scanpy/Seurat workflows. However, we advice to be careful when interpreting down-stream results based on purely imputed values.
 
 ## Accounting for batch effects
 
