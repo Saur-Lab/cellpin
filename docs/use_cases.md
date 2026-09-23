@@ -8,7 +8,7 @@
 
 ## When should you use cellpin?
 
-Cellpin is worth reaching for whenever you have **single-cell resolved spatial transcriptomics data** and intend to do any kind of downstream analysis with it.
+cellpin is particularly useful when you have **single-cell-resolved spatial transcriptomics data** and want to obtain a richer and more robust representation of cellular state for downstream analysis.
 
 Matched reference data, a scRNA-seq sample from the same tissue block, is great, but it is entirely optional. Cellpin works well with out-of-batch public atlases, so you do not need to generate your own reference to benefit from it.
 
@@ -26,17 +26,25 @@ Cellpin embeddings are clean while retaining, and often recovering, the biologic
 
 Cellpin imputes genes that are missing from your panel and denoises the genes you did measure. Both capabilities are benchmarked in the [preprint](https://doi.org/10.64898/2026.06.02.729566).
 
-This is useful when you want to:
+Reconstructed expression can be useful for:
 
-- **Detect cell types whose markers are absent from your panel.** Panels are finite; the cell types in your tissue are not.
-- **Test hypotheses that depend on unmeasured genes**, without designing and running a new panel.
-- **Run analyses that noise would otherwise corrupt**, such as differential expression, cell–cell communication and neighbourhood statistics, without missegmentation and transcript-diffusion artefacts driving the result.
+* **exploring cell types or states whose canonical markers are absent from the measured panel**;
+* **generating hypotheses involving genes that were not included in the original experiment**;
+* **visualizing expected expression patterns for unmeasured genes**;
+* **reducing technical noise** in measured genes before exploratory downstream analysis;
+* prioritizing genes, pathways, or cell populations for subsequent experimental validation.
+
+Reconstructed expression should nevertheless be interpreted as model-derived information rather than experimentally measured ground truth. For analyses that depend strongly on gene-level measurements—particularly formal differential-expression testing, cell–cell communication inference, or conclusions based primarily on imputed genes—we recommend using reconstructed values as complementary evidence and validating important findings against measured genes or independent data where possible.
 
 The [Xenium denoising tutorial](notebooks/xenium_denoising.ipynb) works through the second point in detail, showing spurious B-cell markers being removed from neighbouring epithelial cells.
 
 ## 3. Label transfer
 
-Transfer annotations from a reference dataset to annotate your spatial data automatically. See the [label transfer tutorial](notebooks/label_transfer.ipynb).
+cellpin can also transfer cell-type or cell-state annotations from the reference dataset to the spatial data.
+
+Because annotation is derived from the same learned representation, label transfer naturally accompanies the embedding and reconstruction rather than requiring a separate integration workflow.
+
+As with any reference-based annotation method, transferred labels should be checked against independent biological evidence such as measured marker genes, tissue morphology, or spatial context. See the [label transfer tutorial](notebooks/label_transfer.ipynb).
 
 ## One model, one forward pass
 
