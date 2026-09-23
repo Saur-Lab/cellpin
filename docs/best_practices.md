@@ -8,6 +8,14 @@
 
 A few recommendations to get the most out of cellpin before you dive in.
 
+## How we recommend using cellpin
+
+cellpin is designed to complement, rather than replace, experimentally measured expression and established image-analysis workflows. Reconstructed expression can be highly useful for denoising, visualization, hypothesis generation, and extending information beyond a targeted spatial panel, but imputed values should be interpreted as model-derived estimates rather than ground truth.
+
+In many applications, the most powerful output of cellpin is the learned cellular representation itself. By integrating information from the spatial panel with a high-quality single cell reference, cellpin can generate embeddings that capture substantially richer biological structure than the measured panel alone. These representations are particularly useful for resolving fine-grained cellular heterogeneity, identifying rare or transitional cell states, and supporting downstream tasks such as clustering, neighborhood analysis, and label transfer.
+
+Similarly, cellpin is not intended to replace dedicated cell-segmentation methods. Its denoising and representation-learning capabilities can make downstream analyses substantially more robust, but the quality of the input cell boundaries still matters.
+
 ## Reference data
 
 We recommend using at least **20,000 reference cells** for reliable imputation. In our experience, cellpin performs well with a wide range of scRNA-seq reference datasets, but **10X Chromium Flex data** tends to yield the best results, likely due to its high sensitivity and high capture efficiency across diverse cell types. As a general rule: the better the reference, the better the spatial reconstruction.
