@@ -282,3 +282,96 @@ def test_impute_return_var(small_datasets):
     )
     np.testing.assert_allclose(no_noise.layers["imputed_var"], 0.0, atol=1e-6)
     np.testing.assert_allclose(no_noise.layers["imputed"], det.layers["imputed"], rtol=1e-5, atol=1e-6)
+
+
+FIT_KWARGS = {
+    "pretrain_epochs": 1,
+    "train_epochs": 1,
+    "batch_size": 4,
+    "accelerator": "cpu",
+    "devices": 1,
+    "enable_progress_bar": False,
+    "log_every_n_steps": 1,
+}
+
+
+def _params(module):
+    # trainable parameters only (BatchNorm running stats update in train mode even when frozen)
+    return {k: v.detach().clone() for k, v in module.named_parameters()}
+
+
+def _changed(before, module):
+    after = _params(module)
+    return any(not torch.equal(before[k], after[k]) for k in before)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fit_kwargs", "full_changes", "panel_changes", "decoder_changes"),
+    [
+        ({}, {}, True, True, True),  # two-stage default
+        ({}, {"freeze_pretrained": True}, True, True, True),  # decoder frozen only in stage 2
+        ({"lambda_inv": 0.0}, {}, True, True, True),
+        ({"training_mode": "plain_ae"}, {}, False, True, True),
+        ({"training_mode": "single_stage"}, {}, True, True, True),
+        ({"library_mode": "observed_panel"}, {}, True, True, True),
+    ],
+)
+def test_fit_ablation_modes(
+    small_datasets, tmp_path, overrides, fit_kwargs, full_changes, panel_changes, decoder_changes
+):
+    """Each ablation switch trains end to end and updates the expected modules."""
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, **overrides})
+    before = {m: _params(getattr(model.vae, m)) for m in ("z_encoder_full", "z_encoder_panel", "decoder", "l_encoder")}
+
+    model.fit(sc_ds, output_dir=str(tmp_path / "run"), **FIT_KWARGS, **fit_kwargs)
+
+    assert _changed(before["z_encoder_full"], model.vae.z_encoder_full) == full_changes
+    assert _changed(before["z_encoder_panel"], model.vae.z_encoder_panel) == panel_changes
+    assert _changed(before["decoder"], model.vae.decoder) == decoder_changes
+    assert _changed(before["l_encoder"], model.vae.l_encoder) == (overrides.get("library_mode") != "observed_panel")
+
+    out = model.impute(DataLoader(st_ds, batch_size=4), mc_samples=2, return_sparse=False)
+    assert np.isfinite(out.layers["imputed"]).all()
+
+
+def test_decoder_frozen_stage2(small_datasets, tmp_path):
+    """freeze_pretrained=True keeps the decoder fixed during stage 2."""
+    sc_ds, _ = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    kw = {k: v for k, v in FIT_KWARGS.items() if k not in ("pretrain_epochs", "train_epochs")}
+    model.pretrain_model(sc_ds, pretrain_epochs=1, output_dir=str(tmp_path / "pre"), **kw)
+    before = _params(model.vae.decoder)
+    model.train_model(sc_ds, freeze_pretrained=True, max_epochs=1, output_dir=str(tmp_path / "train"), **kw)
+    assert not _changed(before, model.vae.decoder)
+
+
+def test_observed_panel_library(small_datasets):
+    """library_mode='observed_panel' uses log panel totals and no library KL."""
+    sc_ds, _ = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, "library_mode": "observed_panel"})
+    batch = next(iter(DataLoader(sc_ds, batch_size=5)))
+    x_panel = batch["panel_expr"]
+    ql_m, ql_v, lib = model.vae.infer_library(x_panel, torch.log1p(x_panel))
+    torch.testing.assert_close(lib, torch.log(x_panel.sum(1, keepdim=True)))
+    assert torch.all(ql_v == 0)
+    model.train()
+    assert torch.all(model.compute_losses(batch)["kl_l_loss"] == 0)
+
+
+def test_no_inv_skips_teacher(small_datasets):
+    """With lambda_inv=0 the invariance terms are zero and the teacher is not run."""
+    sc_ds, _ = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, "lambda_inv": 0.0})
+    calls = []
+    orig = model.vae.inference
+    model.vae.inference = lambda *a, **k: calls.append(k.get("encoder_view")) or orig(*a, **k)
+    losses = model.compute_losses(next(iter(DataLoader(sc_ds, batch_size=5))))
+    assert calls == ["panel"]
+    assert losses["distill_loss"] == 0 and losses["snn_loss"] == 0
+
+
+def test_invalid_training_mode(small_datasets):
+    sc_ds, _ = small_datasets
+    with pytest.raises(ValueError, match="training_mode"):
+        CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, "training_mode": "bogus"})

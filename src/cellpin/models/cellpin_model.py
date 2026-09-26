@@ -145,6 +145,17 @@ class CellPin(pl.LightningModule):
 
         self.kl_warmup_epochs = int(getattr(self, "kl_warmup_epochs", 0))
 
+        # Training schedule (ablation switch, see fit()):
+        #   "two_stage"    teacher pretraining, then student distillation (default)
+        #   "plain_ae"     no teacher: panel encoder + decoder trained end-to-end on the
+        #                  panel -> full ELBO only (invariance losses disabled)
+        #   "single_stage" teacher and student optimised jointly in one stage
+        self.training_mode = str(getattr(self, "training_mode", "two_stage"))
+        if self.training_mode not in ("two_stage", "plain_ae", "single_stage"):
+            raise ValueError(f"Unknown training_mode '{self.training_mode}'.")
+        if self.training_mode == "plain_ae":
+            self.loss_weights_train["inv"] = 0.0
+
         # n_batch: config takes precedence; fall back to dataset's encoded batch count
         _n_batch = int(getattr(self, "n_batch", 0))
         if _n_batch == 0 and hasattr(sc_dataset, "n_batch"):
@@ -173,6 +184,7 @@ class CellPin(pl.LightningModule):
             input_noise_std=float(getattr(self, "encoder_noise_std", 0.0)),
             exclude_panel=bool(getattr(self, "exclude_panel", False)),
             batch_infer_mode=str(getattr(self, "batch_infer_mode", "mean_onehot")),
+            library_mode=str(getattr(self, "library_mode", "encoder")),
         )
 
         if loaded_state_dict is not None:
@@ -187,7 +199,7 @@ class CellPin(pl.LightningModule):
         # At inference, observed panel values are copied into the decoder output.
         self._reconstruct_panel: bool = bool(getattr(self, "reconstruct_panel", True))
 
-        self._training_stage: Literal["pretrain", "main"] = "main"
+        self._training_stage: Literal["pretrain", "main", "joint"] = "main"
         self._pretrain_completed: bool = False
         self._freeze_pretrained_in_main: bool = True
         self._decoder_warm_unfreeze_epoch: int = int(getattr(self, "decoder_warm_unfreeze_epoch", -1))
@@ -245,7 +257,7 @@ class CellPin(pl.LightningModule):
 
     def _set_stage_trainability(
         self,
-        stage: Literal["pretrain", "main"],
+        stage: Literal["pretrain", "main", "joint"],
         freeze_pretrained: bool = True,
         decoder_trainable_override: bool | None = None,
     ) -> None:
@@ -264,7 +276,10 @@ class CellPin(pl.LightningModule):
         if decoder_trainable_override is not None:
             decoder_trainable = decoder_trainable_override
         panel_trainable = not pretrain_mode
-        library_trainable = True
+        if stage == "joint":
+            full_trainable = decoder_trainable = panel_trainable = True
+        # Observed library size has no parameters to train.
+        library_trainable = self.vae.library_mode == "encoder"
 
         for p in self.vae.z_encoder_full.parameters():
             p.requires_grad = full_trainable
@@ -431,6 +446,24 @@ class CellPin(pl.LightningModule):
         drop_m = px_dropout[:, mask] if px_dropout is not None else px_dropout
         return x_m, rate_m, r_m, drop_m
 
+    def _kl_l_loss(
+        self, ql_m: torch.Tensor, ql_v: torch.Tensor, local_l_mean: torch.Tensor, local_l_var: torch.Tensor
+    ) -> torch.Tensor:
+        """Per-cell KL of the library posterior to its prior (0 for an observed library)."""
+        if self.vae.library_mode == "observed_panel":
+            return torch.zeros(ql_m.size(0), device=ql_m.device)
+        return kl(Normal(ql_m, ql_v.sqrt()), Normal(local_l_mean, local_l_var.sqrt())).sum(dim=1)
+
+    def _elbo_recon_loss(self, x_full: torch.Tensor, out: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Reconstruction loss of one inference output (panel genes excluded if configured)."""
+        if self._reconstruct_panel or self.vae.panel_mask is None:
+            x_r, rate_r, r_r, drop_r = x_full, out["px_rate"], out["px_r"], out["px_dropout"]
+        else:
+            x_r, rate_r, r_r, drop_r = self._mask_recon_to_no_panel(
+                x_full, out["px_rate"], out["px_r"], out["px_dropout"]
+            )
+        return self.vae.get_reconstruction_loss(x_r, rate_r, r_r, drop_r).mean()
+
     # Loss computation
     def compute_pretrain_losses(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Pretraining losses (full-gene view only).
@@ -469,10 +502,7 @@ class CellPin(pl.LightningModule):
         # ELBO components — KL against prior
         kl_loss = self._kl_z_loss(out["qz_m"], out["qz_v"])
 
-        kl_l = kl(
-            Normal(out["ql_m"], out["ql_v"].sqrt()),
-            Normal(local_l_mean, local_l_var.sqrt()),
-        ).sum(dim=1)
+        kl_l = self._kl_l_loss(out["ql_m"], out["ql_v"], local_l_mean, local_l_var)
 
         if self._reconstruct_panel or self.vae.panel_mask is None:
             x_r, rate_r, r_r, drop_r = x_full, out["px_rate"], out["px_r"], out["px_dropout"]
@@ -507,8 +537,13 @@ class CellPin(pl.LightningModule):
             "pearson_loss": pearson_loss,
         }
 
-    def compute_losses(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def compute_losses(self, batch: dict[str, torch.Tensor], joint: bool = False) -> dict[str, torch.Tensor]:
         """Main training losses.
+
+        With ``joint=True`` (``training_mode="single_stage"``) the teacher (full-gene)
+        pass runs with gradients and its ELBO is added to the objective, so teacher and
+        student are optimised together; distillation/SNN targets stay detached. When the
+        invariance weight is 0 (and not joint), the teacher pass is skipped.
 
         Objective:
 
@@ -536,14 +571,20 @@ class CellPin(pl.LightningModule):
         local_l_var = batch.get("local_l_var", torch.ones(x_full.size(0), 1, device=x_full.device))
         batch_index = batch.get("batch_index", None)
 
-        # Pass 1: full encoder — no grad, used only as reference
-        with torch.no_grad():
-            out_full = self.vae.inference(
-                x_full,
-                x_panel=x_panel,
-                encoder_view="full",
-                batch_index=batch_index,
-            )
+        w = self._get_loss_weights("main")
+        use_inv = w["inv"] > 0.0
+
+        # Pass 1: full encoder — reference for the invariance losses (no grad), or the
+        # jointly trained teacher (single-stage ablation)
+        out_full = None
+        if use_inv or joint:
+            with torch.set_grad_enabled(joint and torch.is_grad_enabled()):
+                out_full = self.vae.inference(
+                    x_full,
+                    x_panel=x_panel,
+                    encoder_view="full",
+                    batch_index=batch_index,
+                )
 
         # Pass 2: panel encoder — single pass for ELBO + invariance
         # Poisson resampling first (domain-gap aug), then mixup (contamination aug)
@@ -559,18 +600,9 @@ class CellPin(pl.LightningModule):
         # ---- ELBO from panel outputs — KL against prior ----
         kl_loss = self._kl_z_loss(out_panel["qz_m"], out_panel["qz_v"])
 
-        kl_l = kl(
-            Normal(out_panel["ql_m"], out_panel["ql_v"].sqrt()),
-            Normal(local_l_mean, local_l_var.sqrt()),
-        ).sum(dim=1)
+        kl_l = self._kl_l_loss(out_panel["ql_m"], out_panel["ql_v"], local_l_mean, local_l_var)
 
-        if self._reconstruct_panel or self.vae.panel_mask is None:
-            x_r, rate_r, r_r, drop_r = (x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"])
-        else:
-            x_r, rate_r, r_r, drop_r = self._mask_recon_to_no_panel(
-                x_full, out_panel["px_rate"], out_panel["px_r"], out_panel["px_dropout"]
-            )
-        reconst_loss = self.vae.get_reconstruction_loss(x_r, rate_r, r_r, drop_r).mean()
+        reconst_loss = self._elbo_recon_loss(x_full, out_panel)
 
         # ---- Optional Pearson correlation loss ----
         # lambda_pearson=0.0 → disabled (default).
@@ -581,13 +613,14 @@ class CellPin(pl.LightningModule):
         else:
             pearson_loss = torch.tensor(0.0, device=x_full.device)
 
-        w = self._get_loss_weights("main")
-
         # ---- Invariance: distill full posterior into panel posterior ----
         # distillation_mode="kl"  → KL(q_panel || q_full)  [default]
         # distillation_mode="mse" → MSE between posterior means (simpler, no variance term)
         distill_mode = str(getattr(self, "distillation_mode", "kl"))
-        if distill_mode == "mse":
+        zero = torch.tensor(0.0, device=x_full.device)
+        if not use_inv:
+            distill_loss = zero
+        elif distill_mode == "mse":
             distill_loss = F.mse_loss(out_panel["qz_m"], out_full["qz_m"].detach())
         else:  # "kl"
             panel_qz_v = out_panel["qz_v"].clamp(min=1e-4, max=1e4)
@@ -603,7 +636,10 @@ class CellPin(pl.LightningModule):
 
         # Learnable temperature: stored as log(T), clamped to [0.01, 1.0]
         snn_temp = self.snn_temperature.exp().clamp(0.01, 1.0)
-        snn = soft_nn_loss(out_panel["qz_m"], out_full["qz_m"].detach(), temperature=snn_temp)
+        if use_inv:
+            snn = soft_nn_loss(out_panel["qz_m"], out_full["qz_m"].detach(), temperature=snn_temp)
+        else:
+            snn = zero
 
         inv_loss = w.get("distill", 1.0) * distill_loss + w.get("snn", 0.1) * snn
 
@@ -617,7 +653,23 @@ class CellPin(pl.LightningModule):
             + lambda_pearson * pearson_loss
         )
 
+        losses: dict[str, torch.Tensor] = {}
+        if joint:
+            # Teacher ELBO with the Stage-1 weights (library KL is counted once, above)
+            w_t = self._get_loss_weights("pretrain")
+            teacher_kl = self._kl_z_loss(out_full["qz_m"], out_full["qz_v"])
+            teacher_recon = self._elbo_recon_loss(x_full, out_full)
+            teacher_pearson = self._pearson_loss(out_full["px_rate"], x_full) if lambda_pearson > 0.0 else zero
+            teacher_total = (
+                w_t["recon"] * teacher_recon
+                + self._kl_annealing_weight() * w_t["kl_weight"] * teacher_kl
+                + lambda_pearson * teacher_pearson
+            )
+            total = total + teacher_total
+            losses = {"teacher_reconst_loss": teacher_recon, "teacher_kl_loss": teacher_kl}
+
         return {
+            **losses,
             "loss": total,
             "reconst_loss": reconst_loss,
             "kl_loss": kl_loss,
@@ -650,7 +702,7 @@ class CellPin(pl.LightningModule):
         if self._training_stage == "pretrain":
             losses = self.compute_pretrain_losses(batch)
         else:
-            losses = self.compute_losses(batch)
+            losses = self.compute_losses(batch, joint=self._training_stage == "joint")
 
         log_kw: dict[str, Any] = {
             "prog_bar": True,
@@ -760,6 +812,7 @@ class CellPin(pl.LightningModule):
         train_size: float = 0.8,
         freeze_pretrained: bool = False,
         require_pretrained: bool = True,
+        stage: Literal["main", "joint"] = "main",
         **trainer_kwargs,
     ):
         """Stage-2 main training (both views, full ELBO + invariance + SNN).
@@ -774,6 +827,8 @@ class CellPin(pl.LightningModule):
                 ``freeze_pretrained=True`` but ``pretrain_model`` was never
                 called, preventing silent training against a random frozen
                 decoder.
+            stage: ``"main"`` (default) or ``"joint"`` (teacher trained jointly with
+                the student, used by ``training_mode="single_stage"``).
             **trainer_kwargs: Forwarded to :class:`~cellpin.training.CellPinTrainer`.
 
         Returns:
@@ -792,7 +847,11 @@ class CellPin(pl.LightningModule):
                 "require_pretrained=False to skip this check."
             )
 
-        self._training_stage = "main"
+        if stage not in ("main", "joint"):
+            raise ValueError(f"stage must be 'main' or 'joint', got '{stage}'.")
+        if stage == "joint" and freeze_pretrained:
+            raise ValueError("stage='joint' trains all modules; freeze_pretrained must be False.")
+        self._training_stage = stage
         self._freeze_pretrained_in_main = freeze_pretrained
 
         warm_unfreeze_epoch = int(
@@ -805,10 +864,12 @@ class CellPin(pl.LightningModule):
             warm_unfreeze_epoch if freeze_pretrained and warm_unfreeze_epoch >= 0 else -1
         )
 
-        decoder_initial_trainable = self._decoder_warm_unfreeze_epoch < 0
+        # Frozen decoder stays frozen unless a warm-unfreeze epoch is scheduled
+        # (previously `warm_unfreeze_epoch < 0` re-enabled it when none was scheduled).
+        decoder_initial_trainable = not freeze_pretrained
         self._decoder_unfrozen = decoder_initial_trainable
         self._set_stage_trainability(
-            "main",
+            stage,
             freeze_pretrained=freeze_pretrained,
             decoder_trainable_override=decoder_initial_trainable,
         )
@@ -954,7 +1015,7 @@ class CellPin(pl.LightningModule):
 
             # deterministic encodings
             qz_m, _, _ = z_encoder(x_panel_)
-            ql_m, _, _ = self.vae.l_encoder(x_panel_)
+            ql_m, _, _ = self.vae.infer_library(x_panel, x_panel_)
 
             if mc_impute:
                 samples = []
@@ -984,7 +1045,7 @@ class CellPin(pl.LightningModule):
                     px_var = stacked.var(dim=0) if mc_samples > 1 else torch.zeros_like(px_rate)
 
             else:
-                library_use = ql_m if use_mean else self.vae.l_encoder(x_panel_)[2]
+                library_use = ql_m if use_mean else self.vae.infer_library(x_panel, x_panel_)[2]
 
                 if self.vae.reconstruction_loss in {"normal", "zin"}:
                     px_rate, _, _ = self.vae.decoder(qz_m, batch_index)
@@ -1125,6 +1186,22 @@ class CellPin(pl.LightningModule):
             enable_checkpointing=save_checkpoints,
             **trainer_kwargs,
         )
+        if self.training_mode != "two_stage":
+            # Ablations without a separate teacher stage: only train_epochs are used.
+            if freeze_pretrained:
+                raise ValueError(
+                    f"freeze_pretrained=True requires training_mode='two_stage' (got '{self.training_mode}')."
+                )
+            self.train_model(
+                dataset=dataset,
+                freeze_pretrained=False,
+                require_pretrained=False,
+                stage="joint" if self.training_mode == "single_stage" else "main",
+                max_epochs=train_epochs,
+                output_dir=f"{output_dir}/train",
+                **shared,
+            )
+            return
         self.pretrain_model(
             dataset=dataset,
             pretrain_epochs=pretrain_epochs,

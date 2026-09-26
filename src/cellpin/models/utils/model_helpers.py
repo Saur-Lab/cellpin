@@ -37,6 +37,12 @@ DEFAULT_PARAMS = {
     "distillation_mode": "mse",
     "snn_temperature_init": 0.173,
     "exclude_panel": False,
+    # Ablation switches (defaults = standard Cellpin)
+    # training_mode: "two_stage" | "plain_ae" (no teacher, panel->full ELBO only)
+    #                | "single_stage" (teacher + student optimised jointly)
+    "training_mode": "two_stage",
+    # library_mode: "encoder" (variational library encoder) | "observed_panel" (log panel total)
+    "library_mode": "encoder",
     # Optimiser
     "lr": 0.00021,
     "weight_decay": 1.3e-6,

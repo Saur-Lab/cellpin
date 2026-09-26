@@ -110,8 +110,12 @@ class CellPinVAE(nn.Module):
         input_noise_std: float = 0.0,
         exclude_panel: bool = False,
         batch_infer_mode: str = "mean_onehot",
+        library_mode: Literal["encoder", "observed_panel"] = "encoder",
     ):
         super().__init__()
+        if library_mode not in ("encoder", "observed_panel"):
+            raise ValueError(f"library_mode must be 'encoder' or 'observed_panel', got '{library_mode}'.")
+        self.library_mode = library_mode
         self.n_input_full = n_input_full
         self.n_input_panel = n_input_panel
         self.n_batch = n_batch
@@ -232,6 +236,29 @@ class CellPinVAE(nn.Module):
         return None
 
     # ------------------------------------------------------------------
+    # Library size
+    # ------------------------------------------------------------------
+
+    def infer_library(
+        self, x_panel: torch.Tensor, x_panel_: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return ``(ql_m, ql_v, library)`` (log-scale) for a panel batch.
+
+        ``library_mode="encoder"`` (default): variational library encoder on the
+        (log-transformed) panel input. ``library_mode="observed_panel"``: the
+        observed log panel total count, deterministic (``ql_v`` = 0 placeholder,
+        no library KL is applied by the model).
+
+        Args:
+            x_panel: Raw panel counts ``(batch, n_input_panel)``.
+            x_panel_: Encoder input (log1p-transformed if ``log_variational``).
+        """
+        if self.library_mode == "observed_panel":
+            library = torch.log(x_panel.sum(dim=1, keepdim=True).clamp(min=1.0))
+            return library, torch.zeros_like(library), library
+        return self.l_encoder(x_panel_)
+
+    # ------------------------------------------------------------------
     # Posterior sampling helpers
     # ------------------------------------------------------------------
 
@@ -281,9 +308,8 @@ class CellPinVAE(nn.Module):
         -------
             Library sample ``(batch, 1)``.
         """
-        if self.log_variational:
-            x = torch.log1p(x)
-        _, _, library = self.l_encoder(x)
+        x_ = torch.log1p(x) if self.log_variational else x
+        _, _, library = self.infer_library(x, x_)
         return library
 
     # ------------------------------------------------------------------
@@ -449,7 +475,7 @@ class CellPinVAE(nn.Module):
         else:
             raise ValueError(f"Unknown encoder_view='{encoder_view}'.")
 
-        ql_m, ql_v, library = self.l_encoder(x_panel_)
+        ql_m, ql_v, library = self.infer_library(x_panel, x_panel_)
 
         # ---- Multiple posterior samples ----
         if n_samples > 1:
@@ -459,7 +485,10 @@ class CellPinVAE(nn.Module):
             z = z_encoder.z_transformation(z)
             ql_m = ql_m.unsqueeze(0).expand(n_samples, *ql_m.shape)
             ql_v = ql_v.unsqueeze(0).expand(n_samples, *ql_v.shape)
-            library = Normal(ql_m, ql_v.sqrt()).rsample()
+            if self.library_mode == "observed_panel":
+                library = ql_m
+            else:
+                library = Normal(ql_m, ql_v.sqrt()).rsample()
 
         # ---- Decode ----
         dec_batch = transform_batch * torch.ones_like(batch_index) if transform_batch is not None else batch_index
