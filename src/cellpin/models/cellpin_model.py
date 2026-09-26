@@ -881,8 +881,31 @@ class CellPin(pl.LightningModule):
         mc_impute: bool = False,
         mc_samples: int = 50,
         mask_fraction: float = 0.2,
+        mc_latent_sample: bool = True,
+        return_var: bool = False,
     ):
-        """Embed cells and generate imputed expression values."""
+        """Embed cells and generate imputed expression values.
+
+        Args:
+            dataloader: DataLoader yielding panel expression batches.
+            use_mean: Use the posterior-mean library size in the deterministic path.
+            mc_impute: Average ``mc_samples`` stochastic passes (latent sampling and/or
+                random panel masking). If ``False``, a single deterministic pass with the
+                posterior-mean latent is used.
+            mc_samples: Number of stochastic passes when ``mc_impute=True``.
+            mask_fraction: Fraction of panel genes randomly zeroed per MC pass.
+            mc_latent_sample: If ``True`` (default), each MC pass samples ``z`` from the
+                panel posterior. If ``False``, each pass uses the posterior mean of the
+                (masked) input, so masking is the only source of stochasticity.
+            return_var: If ``True``, also return the per-cell, per-gene variance of the
+                decoded rate across MC passes (unbiased; zeros when ``mc_samples == 1`` or
+                ``mc_impute=False``).
+
+        Returns:
+        -------
+            Tuple ``(embeddings, px_rate, log_library)``, plus ``px_rate_var`` as a fourth
+            element when ``return_var=True``.
+        """
         self.eval()  # required: DecoderSCVI uses BatchNorm1d (must use running stats)
         if torch.cuda.is_available() and self.device.type == "cpu":
             self.cuda()
@@ -913,7 +936,7 @@ class CellPin(pl.LightningModule):
             else:
                 print("[CellPin.impute] Panel gene order confirmed ✓")
 
-        embs, px_rates, libraries = [], [], []
+        embs, px_rates, libraries, px_vars = [], [], [], []
 
         z_encoder = self.vae.z_encoder_panel
 
@@ -944,7 +967,9 @@ class CellPin(pl.LightningModule):
 
                     x_in_ = torch.log1p(x_in) if self.vae.log_variational else x_in
 
-                    _, _, z_s = z_encoder(x_in_)
+                    qz_m_s, _, z_s = z_encoder(x_in_)
+                    if not mc_latent_sample:
+                        z_s = qz_m_s
 
                     if self.vae.reconstruction_loss in {"normal", "zin"}:
                         px_rate_s, _, _ = self.vae.decoder(z_s, batch_index)
@@ -955,6 +980,8 @@ class CellPin(pl.LightningModule):
 
                 stacked = torch.stack(samples, dim=0)  # [mc_samples, n_cells, n_genes]
                 px_rate = stacked.mean(dim=0)
+                if return_var:
+                    px_var = stacked.var(dim=0) if mc_samples > 1 else torch.zeros_like(px_rate)
 
             else:
                 library_use = ql_m if use_mean else self.vae.l_encoder(x_panel_)[2]
@@ -963,6 +990,8 @@ class CellPin(pl.LightningModule):
                     px_rate, _, _ = self.vae.decoder(qz_m, batch_index)
                 else:
                     _, _, px_rate, _ = self.vae.decoder(self.vae.dispersion, qz_m, library_use, batch_index)
+                if return_var:
+                    px_var = torch.zeros_like(px_rate)
 
             # keep observed panel genes if needed
             if not self._reconstruct_panel and self.vae.panel_idx is not None:
@@ -972,12 +1001,20 @@ class CellPin(pl.LightningModule):
             embs.append(qz_m.cpu())
             px_rates.append(px_rate.cpu())
             libraries.append(ql_m.cpu())  # log-library
+            if return_var:
+                if not self._reconstruct_panel and self.vae.panel_idx is not None:
+                    px_var = px_var.clone()
+                    px_var[:, self.vae.panel_idx] = 0.0
+                px_vars.append(px_var.cpu())
 
-        return (
+        out = (
             torch.cat(embs).numpy(),
             torch.cat(px_rates).numpy(),
             torch.cat(libraries).numpy(),  # log-library
         )
+        if return_var:
+            out = (*out, torch.cat(px_vars).numpy())
+        return out
 
     def _build_output_anndata(
         self,
@@ -1118,6 +1155,9 @@ class CellPin(pl.LightningModule):
         return_int: bool = False,
         return_sparse: bool = True,
         table_key: str = "table",
+        mc_impute: bool = True,
+        mc_latent_sample: bool = True,
+        return_var: bool = False,
     ) -> ad.AnnData:
         """Impute with MC averaging and optional count-space normalisation.
 
@@ -1156,6 +1196,14 @@ class CellPin(pl.LightningModule):
                 Set to ``False`` to keep dense numpy arrays.
             table_key: Table name to read/write when ``obs_adata`` is a SpatialData
                 object (default ``"table"``).
+            mc_impute: If ``True`` (default), average ``mc_samples`` stochastic passes.
+                If ``False``, use a single deterministic pass (posterior-mean latent,
+                no masking).
+            mc_latent_sample: If ``True`` (default), sample the latent in each MC pass.
+                If ``False``, use the posterior mean of the masked input per pass
+                (masking-only MC).
+            return_var: If ``True``, add ``layers['imputed_var']`` with the per-cell,
+                per-gene variance of the decoded rate across MC passes (dense float32).
 
         Returns:
         -------
@@ -1177,13 +1225,16 @@ class CellPin(pl.LightningModule):
 
         obs_adata, sdata = _resolve_sdata(obs_adata, table_key)
 
-        embeddings, counts, log_library = self.embed_and_impute(
+        results = self.embed_and_impute(
             dataloader,
             use_mean=True,
-            mc_impute=True,
+            mc_impute=mc_impute,
             mc_samples=mc_samples,
             mask_fraction=mask_fraction,
+            mc_latent_sample=mc_latent_sample,
+            return_var=return_var,
         )
+        embeddings, counts, log_library = results[:3]
 
         # Raw counts: smooth MC-averaged px_rate is the best point estimate.
         # Simple round preserves signal for count-level correlation.
@@ -1195,6 +1246,8 @@ class CellPin(pl.LightningModule):
         imputed = sp.csr_matrix(counts) if return_sparse else counts.copy()
         adata_out.X = imputed
         adata_out.layers["imputed"] = imputed
+        if return_var:
+            adata_out.layers["imputed_var"] = results[3].astype(np.float32)
 
         if return_norm:
             # MC estimate of E[log1p(norm(X))] where X ~ NB(mu, theta).

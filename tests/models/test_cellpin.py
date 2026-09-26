@@ -258,3 +258,27 @@ def test_impute_return_norm_area_key(small_datasets):
     obs_adata.obs["cell_area"] = 0.0
     with pytest.raises(ValueError, match="areas must be positive"):
         model.impute(loader, obs_adata=obs_adata, mc_samples=2, return_norm=True, area_key="cell_area")
+
+
+def test_impute_return_var(small_datasets):
+    """return_var adds a non-negative variance layer; deterministic modes give zero variance."""
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    model.eval()
+    loader = DataLoader(st_ds, batch_size=4, shuffle=False)
+
+    adata_out = model.impute(loader, mc_samples=4, return_var=True, return_sparse=False)
+    var = adata_out.layers["imputed_var"]
+    assert var.shape == (len(st_ds), sc_ds.X.shape[1])
+    assert np.isfinite(var).all() and (var >= 0).all()
+    assert var.max() > 0
+
+    det = model.impute(loader, mc_impute=False, return_var=True, return_sparse=False)
+    assert np.all(det.layers["imputed_var"] == 0)
+
+    # posterior-mean latent and no masking: every MC pass is identical
+    no_noise = model.impute(
+        loader, mc_samples=3, mask_fraction=0.0, mc_latent_sample=False, return_var=True, return_sparse=False
+    )
+    np.testing.assert_allclose(no_noise.layers["imputed_var"], 0.0, atol=1e-6)
+    np.testing.assert_allclose(no_noise.layers["imputed"], det.layers["imputed"], rtol=1e-5, atol=1e-6)
