@@ -33,6 +33,8 @@ DEFAULT_PARAMS = {
     "lambda_snn": 0.085,
     "lambda_distill": 1.0,
     "lambda_pearson": 0.05,
+    # Stage-2 (student) Pearson weight; None = same as lambda_pearson (ablation switch)
+    "lambda_pearson_train": None,
     "reconstruct_panel": True,
     "distillation_mode": "mse",
     "snn_temperature_init": 0.173,

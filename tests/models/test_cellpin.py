@@ -375,3 +375,19 @@ def test_invalid_training_mode(small_datasets):
     sc_ds, _ = small_datasets
     with pytest.raises(ValueError, match="training_mode"):
         CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, "training_mode": "bogus"})
+
+
+def test_student_decoder_loss_switches(small_datasets):
+    """lambda_recon=0 + lambda_pearson_train=0: Stage 2 sends no gradient to the decoder; Stage 1 keeps Pearson."""
+    sc_ds, _ = small_datasets
+    cfg = {**MINIMAL_CONFIG, "lambda_pearson": 0.5, "lambda_pearson_train": 0.0, "lambda_recon": 0.0}
+    model = CellPin(sc_dataset=sc_ds, config=cfg)
+    model.train()
+    batch = next(iter(DataLoader(sc_ds, batch_size=5)))
+    assert model.compute_pretrain_losses(batch)["pearson_loss"] > 0
+    losses = model.compute_losses(batch)
+    assert losses["pearson_loss"] == 0
+    model.zero_grad()
+    losses["loss"].backward()
+    assert all(p.grad is None or torch.all(p.grad == 0) for p in model.vae.decoder.parameters())
+    assert any(p.grad is not None and torch.any(p.grad != 0) for p in model.vae.z_encoder_panel.parameters())

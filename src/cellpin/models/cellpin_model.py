@@ -607,8 +607,11 @@ class CellPin(pl.LightningModule):
         # ---- Optional Pearson correlation loss ----
         # lambda_pearson=0.0 → disabled (default).
         # loss_pearson = 1 - mean_g pearson(px_rate[:, g], x_full[:, g])
+        # lambda_pearson_train (optional) overrides the weight for the student (Stage 2) only.
         lambda_pearson = float(getattr(self, "lambda_pearson", 0.0))
-        if lambda_pearson > 0.0:
+        lp_train = getattr(self, "lambda_pearson_train", None)
+        lambda_pearson_student = lambda_pearson if lp_train is None else float(lp_train)
+        if lambda_pearson_student > 0.0:
             pearson_loss = self._pearson_loss(out_panel["px_rate"], x_full)
         else:
             pearson_loss = torch.tensor(0.0, device=x_full.device)
@@ -650,7 +653,7 @@ class CellPin(pl.LightningModule):
             + kl_w * kl_loss
             + kl_l.mean()  # library KL always weight-1
             + w["inv"] * inv_loss
-            + lambda_pearson * pearson_loss
+            + lambda_pearson_student * pearson_loss
         )
 
         losses: dict[str, torch.Tensor] = {}
