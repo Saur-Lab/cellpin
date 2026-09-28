@@ -314,6 +314,7 @@ def _changed(before, module):
         ({"training_mode": "plain_ae"}, {}, False, True, True),
         ({"training_mode": "single_stage"}, {}, True, True, True),
         ({"library_mode": "observed_panel"}, {}, True, True, True),
+        ({"freeze_library_train": True}, {"freeze_pretrained": True}, True, True, True),
     ],
 )
 def test_fit_ablation_modes(
@@ -391,3 +392,16 @@ def test_student_decoder_loss_switches(small_datasets):
     losses["loss"].backward()
     assert all(p.grad is None or torch.all(p.grad == 0) for p in model.vae.decoder.parameters())
     assert any(p.grad is not None and torch.any(p.grad != 0) for p in model.vae.z_encoder_panel.parameters())
+
+
+def test_freeze_library_stage2(small_datasets, tmp_path):
+    """freeze_library_train=True keeps the library encoder fixed during stage 2 only."""
+    sc_ds, _ = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config={**MINIMAL_CONFIG, "freeze_library_train": True})
+    kw = {k: v for k, v in FIT_KWARGS.items() if k not in ("pretrain_epochs", "train_epochs")}
+    before = _params(model.vae.l_encoder)
+    model.pretrain_model(sc_ds, pretrain_epochs=1, output_dir=str(tmp_path / "pre"), **kw)
+    assert _changed(before, model.vae.l_encoder)
+    before = _params(model.vae.l_encoder)
+    model.train_model(sc_ds, freeze_pretrained=True, max_epochs=1, output_dir=str(tmp_path / "train"), **kw)
+    assert not _changed(before, model.vae.l_encoder)

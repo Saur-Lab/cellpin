@@ -45,6 +45,8 @@ DEFAULT_PARAMS = {
     "training_mode": "two_stage",
     # library_mode: "encoder" (variational library encoder) | "observed_panel" (log panel total)
     "library_mode": "encoder",
+    # freeze_library_train: keep the Stage-1 library encoder fixed in Stage 2 (ablation switch)
+    "freeze_library_train": False,
     # Optimiser
     "lr": 0.00021,
     "weight_decay": 1.3e-6,

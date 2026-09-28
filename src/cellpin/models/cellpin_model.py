@@ -278,8 +278,11 @@ class CellPin(pl.LightningModule):
         panel_trainable = not pretrain_mode
         if stage == "joint":
             full_trainable = decoder_trainable = panel_trainable = True
-        # Observed library size has no parameters to train.
+        # Observed library size has no parameters to train. freeze_library_train (ablation switch)
+        # keeps the Stage-1 library encoder fixed in Stage 2.
         library_trainable = self.vae.library_mode == "encoder"
+        if stage == "main" and bool(getattr(self, "freeze_library_train", False)):
+            library_trainable = False
 
         for p in self.vae.z_encoder_full.parameters():
             p.requires_grad = full_trainable
