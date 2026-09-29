@@ -154,3 +154,22 @@ class TestExcludePanel:
         out = vae.inference(x_full, x_panel=x_panel, encoder_view="full")
         assert out["z"].shape == (B, 8)
         assert torch.isfinite(out["z"]).all()
+
+
+class TestInferBatchCovariate:
+    def _vae(self, mode):
+        return CellPinVAE(
+            n_input_full=N_FULL, n_input_panel=N_PANEL, n_hidden=16, n_latent=4, n_batch=3, batch_infer_mode=mode
+        )
+
+    def test_mean_onehot(self):
+        cat = self._vae("mean_onehot")._get_infer_batch_cat(5, torch.device("cpu"))
+        assert torch.allclose(cat, torch.full((5, 3), 1 / 3))
+
+    def test_index_mode_is_onehot(self):
+        cat = self._vae("index:2")._get_infer_batch_cat(5, torch.device("cpu"))
+        assert torch.equal(cat, torch.tensor([[0.0, 0.0, 1.0]]).repeat(5, 1))
+
+    def test_index_mode_out_of_range(self):
+        with pytest.raises(ValueError):
+            self._vae("index:3")._get_infer_batch_cat(5, torch.device("cpu"))

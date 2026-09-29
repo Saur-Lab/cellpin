@@ -223,7 +223,11 @@ class CellPinVAE(nn.Module):
         return batch_index
 
     def _get_infer_batch_cat(self, n_cells: int, device: torch.device) -> torch.Tensor | None:
-        """Return a batch covariate for inference when labels are missing."""
+        """Return a batch covariate for inference when labels are missing.
+
+        ``batch_infer_mode``: ``"mean_onehot"`` (1/B for every batch) or ``"index:<k>"`` (decode every cell as
+        reference batch k, one-hot).
+        """
         if self.n_batch == 0:
             return None
         if self.batch_infer_mode == "mean_onehot":
@@ -233,6 +237,13 @@ class CellPinVAE(nn.Module):
                 device=device,
                 dtype=torch.float32,
             )
+        if self.batch_infer_mode.startswith("index:"):
+            k = int(self.batch_infer_mode.split(":", 1)[1])
+            if not 0 <= k < self.n_batch:
+                raise ValueError(f"batch_infer_mode index {k} out of range for n_batch={self.n_batch}.")
+            cat = torch.zeros((n_cells, self.n_batch), device=device, dtype=torch.float32)
+            cat[:, k] = 1.0
+            return cat
         return None
 
     # ------------------------------------------------------------------
