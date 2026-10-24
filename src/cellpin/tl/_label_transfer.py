@@ -96,6 +96,10 @@ def label_transfer(
     accuracy = float(accuracy_score(y_test, clf.predict(X_test)))
     print(f"[label_transfer] Test accuracy: {accuracy:.4f}")
 
+    # Use all labelled reference cells for the final spatial annotation after
+    # evaluating classifier accuracy on the held-out reference cells.
+    clf.fit(X, y)
+
     X_sp = np.array(sp_adata.obsm["X_cellpin"])
     proba = clf.predict_proba(X_sp)
     max_proba = proba.max(axis=1)
