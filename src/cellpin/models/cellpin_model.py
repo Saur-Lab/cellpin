@@ -844,6 +844,24 @@ class CellPin(pl.LightningModule):
             return batch["full_expr"]
         raise KeyError("Batch must contain 'panel_expr' or 'full_expr'.")
 
+    def _get_panel_permutation(self, dataset) -> torch.Tensor | None:
+        """Return a permutation that aligns dataset panel genes to model order."""
+        if not hasattr(dataset, "panel_genes") or not hasattr(self, "panel_gene_names"):
+            return None
+
+        ds_panel = list(dataset.panel_genes)
+        model_panel = self.panel_gene_names
+        if ds_panel == model_panel:
+            return None
+
+        ds_idx = {g: i for i, g in enumerate(ds_panel)}
+        missing = [g for g in model_panel if g not in ds_idx]
+        if missing:
+            raise ValueError(f"Dataset is missing {len(missing)} genes the model expects: {missing[:10]} ...")
+
+        perm = [ds_idx[g] for g in model_panel]
+        return torch.tensor(perm, dtype=torch.long)
+
     @torch.no_grad()
     def get_cell_embedding(
         self,
@@ -864,9 +882,12 @@ class CellPin(pl.LightningModule):
         """
         self.eval()
         encoder = self.vae.z_encoder_panel
+        panel_perm = self._get_panel_permutation(dataloader.dataset)
         embs = []
         for batch in track(dataloader, description="Embedding cells"):
             x_panel = self._panel_from_batch(batch).to(self.device)
+            if panel_perm is not None:
+                x_panel = x_panel[:, panel_perm.to(x_panel.device)]
             if self.vae.log_variational:
                 x_panel = torch.log1p(x_panel)
             qz_m, _, z = encoder(x_panel)
@@ -894,21 +915,13 @@ class CellPin(pl.LightningModule):
         # --- Panel gene order safeguard ---
         # Detect if the dataset's panel gene order differs from what the model was
         # trained with (sc_adata positional order) and compute a permutation to fix it.
-        panel_perm: torch.Tensor | None = None
         dataset = dataloader.dataset
+        panel_perm = self._get_panel_permutation(dataset)
         if hasattr(dataset, "panel_genes") and hasattr(self, "panel_gene_names"):
-            ds_panel = list(dataset.panel_genes)
-            model_panel = self.panel_gene_names
-            if ds_panel != model_panel:
-                ds_idx = {g: i for i, g in enumerate(ds_panel)}
-                missing = [g for g in model_panel if g not in ds_idx]
-                if missing:
-                    raise ValueError(f"Dataset is missing {len(missing)} genes the model expects: {missing[:10]} ...")
-                perm = [ds_idx[g] for g in model_panel]
-                panel_perm = torch.tensor(perm, dtype=torch.long)
+            if panel_perm is not None:
                 print(
                     f"[CellPin.impute] Panel gene order mismatch detected — "
-                    f"auto-reordering {len(perm)} genes to match model's sc_adata order."
+                    f"auto-reordering {len(panel_perm)} genes to match model's sc_adata order."
                 )
             else:
                 print("[CellPin.impute] Panel gene order confirmed ✓")

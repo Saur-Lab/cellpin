@@ -67,8 +67,10 @@ class scAnnDataset(Dataset):
             panel_idx = [gene_to_idx[g] for g in panel if g in gene_to_idx]
             panel_idx = np.asarray(panel_idx, dtype=np.int64)
             if panel_idx.size > 1:
-                _, first_pos = np.unique(panel_idx, return_index=True)
-                panel_idx = panel_idx[np.sort(first_pos)]
+                # ``panel_expr`` is selected with a boolean mask below, which
+                # always follows adata column order. Keep the metadata in that
+                # same order so panel_idx, panel_genes and panel_expr agree.
+                panel_idx = np.unique(panel_idx)
         else:
             panel_idx = np.empty((0,), dtype=np.int64)
 
