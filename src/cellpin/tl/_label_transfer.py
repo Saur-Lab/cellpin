@@ -27,11 +27,16 @@ def label_transfer(
     test_size: float = 0.2,
     random_state: int = 42,
     table_key: str = "table",
+    sc_layer: str | None = None,
+    sp_layer: str | None = None,
 ) -> tuple[float, ad.AnnData]:
     """Transfer cell type labels from scRNA to spatial data via kNN in cellpin latent space.
 
     If ``X_cellpin`` is absent from either adata, ``impute()`` is run automatically
-    with default settings and the embedding is stored back into the adata.
+    with default settings and the embedding is stored back into the adata. The
+    expression for that embedding is read from ``.X`` unless ``sc_layer`` /
+    ``sp_layer`` name a layer to use instead. The model expects raw counts, so
+    pass e.g. ``sc_layer="counts"`` when ``.X`` holds normalised values.
 
     Args:
         model: Trained :class:`~cellpin.models.CellPin` instance.
@@ -46,6 +51,10 @@ def label_transfer(
         test_size: Fraction of scRNA cells held out for evaluation (default 0.2).
         random_state: Random seed for the train/test split (default 42).
         table_key: Table key when ``sp_adata`` is a ``SpatialData`` object.
+        sc_layer: Layer of ``sc_adata`` with raw counts, used instead of ``.X``
+            when ``X_cellpin`` has to be computed (default ``None`` = ``.X``).
+        sp_layer: Layer of ``sp_adata`` with raw counts, used instead of ``.X``
+            when ``X_cellpin`` has to be computed (default ``None`` = ``.X``).
 
     Returns:
         Tuple of ``(test_accuracy, sp_adata)``.
@@ -56,19 +65,22 @@ def label_transfer(
 
     if cell_type_col not in sc_adata.obs.columns:
         raise ValueError(f"Column {cell_type_col!r} not found in sc_adata.obs")
+    for name, adata, layer in (("sc_adata", sc_adata, sc_layer), ("sp_adata", sp_adata, sp_layer)):
+        if layer is not None and layer not in adata.layers:
+            raise ValueError(f"Layer {layer!r} not found in {name}.layers. Available: {list(adata.layers.keys())}")
 
     panel_genes = list(model.panel_gene_names)
 
     if "X_cellpin" not in sc_adata.obsm:
         print("[label_transfer] X_cellpin not found in sc_adata — embedding with default settings...")
-        sc_ds = scAnnDataset(sc_adata, panel=panel_genes)
+        sc_ds = scAnnDataset(sc_adata, layer=sc_layer, panel=panel_genes)
         sc_loader = DataLoader(sc_ds, batch_size=256, shuffle=False, num_workers=0)
         sc_imputed = model.impute(sc_loader)
         sc_adata.obsm["X_cellpin"] = sc_imputed.obsm["X_cellpin"]
 
     if "X_cellpin" not in sp_adata.obsm:
         print("[label_transfer] X_cellpin not found in sp_adata — embedding with default settings...")
-        sp_ds = stAnnDataset(sp_adata, panel_genes=panel_genes)
+        sp_ds = stAnnDataset(sp_adata, panel_genes=panel_genes, layer=sp_layer)
         sp_loader = DataLoader(sp_ds, batch_size=256, shuffle=False, num_workers=0)
         sp_imputed = model.impute(sp_loader)
         sp_adata.obsm["X_cellpin"] = sp_imputed.obsm["X_cellpin"]
