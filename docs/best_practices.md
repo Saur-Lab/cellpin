@@ -56,7 +56,10 @@ If reconstructions look over-smoothed (e.g. cells of the same type losing fine-g
 
 ```python
 model = cellpin.CellPin(sc_dataset, config={"kl_free_bits": 2.0})
+model.fit(sc_dataset, checkpoint_monitor="val_reconst_loss")
 ```
+
+When using the KL floor, set early stopping to monitor the reconstruction loss (`checkpoint_monitor="val_reconst_loss"`) instead of the default `val_loss`. With the floor, the KL part of `val_loss` cannot drop below the floor, so the total validation loss is no longer a reliable stopping signal.
 
 ## Getting the most out of cellpin
 
