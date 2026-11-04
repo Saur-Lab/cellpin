@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## [Unreleased]
+
+- Added the `cellpin` agent skill (`skills/cellpin/`, also shipped in the package as
+  `cellpin/skills/cellpin/`): intake checklist, preflight input checker, workflow, best practices
+  and troubleshooting for coding agents.
+- `tl.label_transfer` gains `sc_layer` / `sp_layer` (default `None` = `.X`) to choose the raw-count
+  layer used when `X_cellpin` has to be computed. Previously `.X` was always used, which gave a wrong
+  reference embedding when `.X` held normalised values.
+
 ## [0.3.0] - 2026-08-21
 
 - Added `kl_free_bits`, an opt-in per-latent-dimension floor on the KL term
