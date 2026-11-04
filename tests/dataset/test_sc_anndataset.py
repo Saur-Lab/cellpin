@@ -36,6 +36,14 @@ def test_getitem_values(adata):
     assert torch.allclose(item["no_panel_expr"], torch.tensor([2.0]))
 
 
+def test_shuffled_panel_uses_adata_gene_order(adata):
+    ds = scAnnDataset(adata=adata, panel=["gene3", "gene1"])
+
+    assert ds.panel_idx.tolist() == [0, 2]
+    assert ds.panel_genes == ["gene1", "gene3"]
+    assert torch.allclose(ds[0]["panel_expr"], torch.tensor([1.0, 3.0]))
+
+
 def test_layer(adata):
     ds = scAnnDataset(adata=adata, layer="counts", panel=["gene1"])
     item = ds[0]

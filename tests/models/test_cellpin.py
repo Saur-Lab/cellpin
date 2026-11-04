@@ -6,6 +6,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
+from cellpin.dataset import stAnnDataset
 from cellpin.models import CellPin
 from cellpin.pp import setup_data
 
@@ -72,6 +73,24 @@ def test_cellpin_get_cell_embedding(small_datasets):
 
     assert embeddings.shape == (len(sc_ds), MINIMAL_CONFIG["n_latent"])
     assert embeddings.dtype == np.float32
+
+
+def test_get_cell_embedding_reorders_panel_genes(small_datasets):
+    sc_ds, st_ds = small_datasets
+    model = CellPin(sc_dataset=sc_ds, config=MINIMAL_CONFIG)
+    model.eval()
+
+    expected = model.get_cell_embedding(DataLoader(st_ds, batch_size=4, shuffle=False))
+
+    reversed_adata = st_ds.adata[:, ::-1].copy()
+    reversed_ds = stAnnDataset(
+        reversed_adata,
+        panel_genes=list(reversed(st_ds.panel_genes)),
+        layer="counts",
+    )
+    actual = model.get_cell_embedding(DataLoader(reversed_ds, batch_size=4, shuffle=False))
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-6)
 
 
 def test_cellpin_impute(small_datasets):
