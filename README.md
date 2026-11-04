@@ -50,6 +50,25 @@ uv pip install "cellpin[spatial]"
 
 cellpin is computationally lightweight, but a GPU is highly recommended for training and imputation speed.
 
+## Using cellpin with AI coding agents
+
+[`skills/cellpin/`](skills/cellpin) is an agent skill. It walks your coding agent through the tutorials and best practices: an intake checklist, a preflight check of your data, training, imputation, label transfer, and validation.
+
+The skill ships with the pip package. Copy it to your agent's skills directory:
+
+```bash
+SKILL_DIR=$(python -c "import cellpin, pathlib; print(pathlib.Path(cellpin.__file__).parent / 'skills' / 'cellpin')")
+cp -r "$SKILL_DIR" ~/.claude/skills/        # Claude Code (user-level)
+# or: cp -r "$SKILL_DIR" .claude/skills/    # Claude Code (this project only)
+# other agents that support SKILL.md: copy it into their skills folder
+```
+
+(From a repo checkout, copy `skills/cellpin` instead.)
+
+Then ask, for example: *"Use cellpin to impute my Xenium data at data/xenium.h5ad with the reference atlas at data/ref.h5ad."*
+
+You can also run the preflight check on its own: `python skills/cellpin/scripts/check_inputs.py --sc ref.h5ad --sp spatial.h5ad --layer counts`.
+
 ## Documentation
 
 Full documentation, tutorials, and API reference: [cellpin.readthedocs.io](https://cellpin.readthedocs.io/)

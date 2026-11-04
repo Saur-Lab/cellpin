@@ -74,6 +74,8 @@ doc = [
 ]
 
 [tool.hatch]
+# Ship the agent skill inside the package: <site-packages>/cellpin/skills/cellpin/
+build.targets.wheel.force-include."skills" = "cellpin/skills"
 envs.default.installer = "uv"
 envs.default.dependency-groups = [ "dev" ]
 envs.docs.dependency-groups = [ "doc" ]
